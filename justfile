@@ -17,3 +17,11 @@ watch:
 # 取消最新一次 workflow 运行.
 cancel:
     gh run cancel "$(gh run list --repo azazo1/ssh-debug --workflow ssh.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+
+# 下载最新一次运行的 tmate 连接信息.
+connection:
+    gh run download "$(gh run list --repo azazo1/ssh-debug --workflow ssh.yml --limit 1 --json databaseId --jq '.[0].databaseId')" -n tmate-connection -R azazo1/ssh-debug
+
+# 下载最新一次运行的构建产物.
+download:
+    gh run download "$(gh run list --repo azazo1/ssh-debug --workflow ssh.yml --limit 1 --json databaseId --jq '.[0].databaseId')" -n build-artifacts -R azazo1/ssh-debug

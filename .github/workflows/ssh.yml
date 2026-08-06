@@ -12,14 +12,37 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Start tmate session
+        id: tmate
         uses: mxschmitt/action-tmate@v3
         with:
           limit-access-to-actor: true
+          detached: true
+          connect-timeout-seconds: 1800
 
-      - name: Upload debug files
+      - name: Save connection info
+        run: |
+          echo "${{ steps.tmate.outputs.ssh-command }}" > ssh.txt
+          echo "${{ steps.tmate.outputs.web-url }}" >> ssh.txt
+
+      - name: Upload connection info
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmate-connection
+          path: ssh.txt
+          if-no-files-found: warn
+
+      - name: Wait for continue marker
+        run: |
+          until [ -f continue ]; do
+            sleep 5
+          done
+
+      - name: Upload build artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: debug-files
-          path: .
+          name: build-artifacts
+          path: |
+            target/
+            dist/
           if-no-files-found: warn

@@ -26,7 +26,7 @@ connection:
 
 # 读取 ssh.txt 并进入 SSH 会话.
 ssh: connection
-    ssh $$(cat ssh.txt)
+    eval "$(cat ssh.txt)"
 
 # 下载最新一次运行的构建产物.
 download:

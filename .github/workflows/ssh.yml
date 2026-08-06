@@ -22,13 +22,15 @@ jobs:
       - name: Save connection info
         run: |
           echo "${{ steps.tmate.outputs.ssh-command }}" > ssh.txt
-          echo "${{ steps.tmate.outputs.web-url }}" >> ssh.txt
+          echo "${{ steps.tmate.outputs.web-url }}" > web.txt
 
       - name: Upload connection info
         uses: actions/upload-artifact@v4
         with:
           name: tmate-connection
-          path: ssh.txt
+          path: |
+            ssh.txt
+            web.txt
           if-no-files-found: warn
 
       - name: Wait for continue marker

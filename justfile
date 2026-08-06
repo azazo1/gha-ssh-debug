@@ -18,9 +18,14 @@ watch:
 cancel:
     gh run cancel "$(gh run list --repo azazo1/ssh-debug --workflow ssh.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 
-# 下载最新一次运行的 tmate 连接信息.
+# 下载最新一次运行的 tmate 连接信息到本地并打印.
 connection:
-    gh run download "$(gh run list --repo azazo1/ssh-debug --workflow ssh.yml --limit 1 --json databaseId --jq '.[0].databaseId')" -n tmate-connection -R azazo1/ssh-debug
+    gh run download "$(gh run list --repo azazo1/ssh-debug --workflow ssh.yml --limit 1 --json databaseId --jq '.[0].databaseId')" -n tmate-connection -D . -R azazo1/ssh-debug
+    cat ssh.txt
+
+# 读取 ssh.txt 并进入 SSH 会话.
+ssh: connection
+    ssh $$(cat ssh.txt)
 
 # 下载最新一次运行的构建产物.
 download:

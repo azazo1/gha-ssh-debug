@@ -44,7 +44,7 @@ jobs:
 
       - name: Wait for continue marker
         run: |
-          until [ -f continue ]; do
+          until [ -f continue ] || [ ! -e /tmp/tmate.sock ]; do
             sleep 5
           done
 

@@ -13,3 +13,7 @@ status:
 # 监听 workflow 实时日志.
 watch:
     gh run watch --repo azazo1/ssh-debug
+
+# 取消最新一次 workflow 运行.
+cancel:
+    gh run cancel "$(gh run list --repo azazo1/ssh-debug --workflow ssh.yml --limit 1 --json databaseId --jq '.[0].databaseId')"

@@ -6,7 +6,7 @@ on:
 jobs:
   ssh:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,6 +23,10 @@ jobs:
       - name: Start tmate session
         id: tmate
         uses: mxschmitt/action-tmate@v3
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
         with:
           limit-access-to-actor: true
           detached: true

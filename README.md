@@ -1,1 +1,1 @@
-# ssh-debug
+# gha-ssh-debug

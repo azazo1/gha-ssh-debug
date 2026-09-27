@@ -7,7 +7,7 @@ description: 用 GitHub Actions 开 SSH 连 GitHub-hosted runner. 适用于要�
 
 参考实现: 本仓库 `.github/workflows/ssh-upterm.yml`.
 
-默认仓库: `azazo1/ssh-debug`. 换仓库时替换 `OWNER/REPO`.
+默认仓库: `azazo1/gha-ssh-debug`. 换仓库时替换 `OWNER/REPO`.
 
 ## 何时用
 
@@ -115,7 +115,7 @@ Upterm 是共享 PTY, 不是普通 sshd:
 touch "$GITHUB_WORKSPACE/continue"
 ```
 
-本仓库 workspace 一般是 `/Users/runner/work/ssh-debug/ssh-debug`. 不要 `exit`.
+本仓库 workspace 一般是 `/Users/runner/work/gha-ssh-debug/gha-ssh-debug`. 不要 `exit`.
 
 ### 6. 取消
 
@@ -128,7 +128,7 @@ gh api --method POST repos/OWNER/REPO/actions/runs/<id>/cancel
 不改对方仓库, 也不改本仓库文件时:
 
 1. 开 SSH.
-2. clone 到 `/Users/runner/<project>`, 不要动 ssh-debug 工作区 (除了最后的 `continue`).
+2. clone 到 `/Users/runner/<project>`, 不要动 gha-ssh-debug 工作区 (除了最后的 `continue`).
 3. 按对方 workflow **原样** 跑命令. `fetch-depth: 0` 的就全量 clone (版本号脚本可能 `git rev-list --count`).
 4. `runs-on` 对不上就不要硬跑: 官方 `macos-26` 的 Flutter/macOS 构建在 `macos-15` 上会因为 SDK API (例如 `NWPath.isUltraConstrained`) 直接 `BUILD FAILED`.
 5. 官方 CI 自己改工作副本 (patch, 写 `pili_release.json`) 可以; 不要 commit / push 回去.

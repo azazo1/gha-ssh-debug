@@ -60,8 +60,8 @@ guard:
     fi
     check_var() {
       if [ "$2" != "$3" ]; then
-        echo "变量 $1 和 branch 推导出来的值对不上: 期望 $3, 实际 $2." >&2
-        echo "这些派生变量不要在命令行覆盖, 需要改就改 justfile." >&2
+        echo "变量 $1 不该被命令行覆盖: 期望 $3, 实际 $2." >&2
+        echo "它是由 branch 与 origin 推出来的, 需要改就改 justfile." >&2
         exit 6
       fi
     }
@@ -71,6 +71,8 @@ guard:
     check_var conn "{{ conn }}" "$expected_root/upterm"
     check_var workflow_path "{{ workflow_path }}" ".github/workflows/ssh-debug-upterm.yml"
     check_var template "{{ template }}" "{{ justfile_directory() }}/ssh-debug-upterm.yml"
+    expected_repo="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@[^:]+:##; s#^ssh://[^/]+/##; s#^https?://[^/]+/##; s#\.git$##' || true)"
+    check_var repo "{{ repo }}" "$expected_repo"
 
 # just -f <本 skill 目录>/assets/justfile -d <目标 repo> check
 # 只读体检: 目标仓库, 依赖状态, 上次残留, 以及建议配置的 allow prefix.
@@ -219,6 +221,7 @@ cancel run_id="":
 clean: guard
     #!/usr/bin/env bash
     set -euo pipefail
+    echo "将要清理: 远端分支 {{ branch }}, worktree {{ wt }}, 本地分支 {{ branch }}, 目录 {{ root }}"
     for id in $(gh run list --repo "{{ repo }}" --branch "{{ branch }}" --limit 10 --json databaseId,status --jq '.[] | select(.status != "completed") | .databaseId'); do
       gh api --method POST "repos/{{ repo }}/actions/runs/$id/cancel" || true
     done

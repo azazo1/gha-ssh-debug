@@ -132,7 +132,7 @@ gh api --method POST repos/OWNER/REPO/actions/runs/<id>/cancel
 3. 按对方 workflow **原样** 跑命令. `fetch-depth: 0` 的就全量 clone (版本号脚本可能 `git rev-list --count`).
 4. `runs-on` 对不上就不要硬跑: 官方 `macos-26` 的 Flutter/macOS 构建在 `macos-15` 上会因为 SDK API (例如 `NWPath.isUltraConstrained`) 直接 `BUILD FAILED`.
 5. 官方 CI 自己改工作副本 (patch, 写 `pili_release.json`) 可以; 不要 commit / push 回去.
-6. 产物想带回来: scp/wormhole/再传 artifact. 本仓库 Upterm workflow 默认只传 `ssh.txt`.
+6. 产物想带回来: scp 或重新上传 artifact. 本仓库 Upterm workflow 默认只传 `ssh.txt`.
 
 ## 踩坑
 
@@ -153,7 +153,6 @@ gh api --method POST repos/OWNER/REPO/actions/runs/<id>/cancel
 - 不要为了 SSH 去改目标项目的 workflow (除非用户明确允许).
 - 不要把这条特例扩到别的 ssh/scp. 只有连这个临时 CI 的 Upterm 可以沙箱内不提权.
 - 不要 `gh run watch` 当后台等待.
-- 不要把 wormhole 当成开 SSH 的方法, 它只是连上之后传文件.
 - 不要安装用户级软件; runner 上为了跑 CI 装项目依赖可以.
 - 不要读对方仓库的密钥 / `*password*` / 未授权配置. CI 自己生成的 `pili_release.json` 这种版本文件除外, 仍尽量少读内容.
 

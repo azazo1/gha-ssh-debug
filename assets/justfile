@@ -1,0 +1,194 @@
+# 临时 SSH 调试食谱, 属于 gha-ssh-debug skill.
+#
+# 调用形态:
+#   just -f <本 skill 目录>/assets/justfile -d <目标 repo 主工作树根目录> branch=<harness>/ssh-debug <recipe> [参数]
+#
+#   -f  指定本文件, 这样目标 repo 里不必多出任何本 skill 的文件.
+#   -d  把 recipe 的工作目录钉在目标 repo 根目录 (just 默认会切到 justfile 所在目录, 必须用 -d 纠回来).
+#       要指主工作树, 不是 .tmp 下的 worktree.
+#   branch  本次调试用的临时分支名, 由调用者自己定. 别用固定的名字: 不同 harness 用不同前缀
+#           (例如 dsh/ssh-debug, claude/ssh-debug), 同一个 repo 被两个 harness 同时调试时才不会撞车.
+#           也可以用环境变量 SSH_DEBUG_BRANCH 传.
+#
+# 这些 recipe 要写目标 repo 的 .git 并访问 gh 凭据, 所以调用时要提权.
+# 在 dsh-approve-prefix 里放行 `just -f <本 skill 目录>/assets/justfile` 即可自动通过, 适合无人值守执行.
+
+branch := env_var_or_default("SSH_DEBUG_BRANCH", "")
+slug := replace(branch, "/", "-")
+root := ".tmp/ssh-debug-" + slug
+wt := root + "/worktree"
+conn := root + "/upterm"
+workflow_path := ".github/workflows/ssh-debug-upterm.yml"
+template := justfile_directory() / "ssh-debug-upterm.yml"
+# 从 origin 推导 OWNER/REPO; 没有 origin 时留空, 由 guard 报错, 不让 backtick 直接失败
+repo := `git remote get-url origin 2>/dev/null | sed -E 's#^git@[^:]+:##; s#^ssh://[^/]+/##; s#^https?://[^/]+/##; s#\.git$##' || true`
+
+# 列出所有 recipe.
+[private]
+default:
+    @just --list
+
+# 检查 branch, cwd 与 origin remote.
+[private]
+guard:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "{{ branch }}" ]; then
+      echo "未指定临时分支名: 请传 branch=<harness>/ssh-debug, 例如 branch=claude/ssh-debug." >&2
+      exit 1
+    fi
+    if [ -z "{{ repo }}" ]; then
+      echo "从 origin 推不出 OWNER/REPO: 先给目标 repo 配好 origin remote, 或者用 -d 指对目录." >&2
+      exit 2
+    fi
+    if [ "$(git rev-parse --show-toplevel)" != "$PWD" ]; then
+      echo "当前目录不是仓库根目录: 请用 -d <目标 repo 主工作树根目录> 指定." >&2
+      exit 3
+    fi
+    if [ ! -d .git ]; then
+      echo "当前目录是个 worktree, 不是主工作树: 请把 -d 指到主工作树根目录." >&2
+      exit 4
+    fi
+
+# just -f <本 skill 目录>/assets/justfile -d <目标 repo> check
+# 只读体检: 目标仓库, 依赖状态, 上次残留, 以及建议配置的 allow prefix.
+check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+      echo "当前目录不是 git 仓库: 请用 -d <目标 repo 主工作树根目录> 指定." >&2
+      exit 3
+    fi
+    repo="{{ repo }}"
+    echo "目标仓库: ${repo:-未从 origin 推出来}"
+    echo "当前目录: $PWD"
+    echo "当前 HEAD: $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD))"
+    if git check-ignore -q .tmp; then
+      echo ".tmp/ 已被忽略: ok"
+    else
+      echo ".tmp/ 未被忽略: 先往 .gitignore 加一条 .tmp/, 否则 worktree 会污染 git status"
+    fi
+    echo "目标 CI 的 runs-on 候选:"
+    grep -h "runs-on" .github/workflows/*.yml 2>/dev/null | sort -u | sed 's/^/  /' || echo "  没找到 .github/workflows/*.yml"
+    echo "本地 worktree:"
+    git worktree list
+    echo "远端带调试分支名的分支:"
+    if git ls-remote --heads origin | grep -q ssh-debug; then
+      git ls-remote --heads origin | grep ssh-debug || true
+    else
+      echo "  无"
+    fi
+    echo "默认分支上是否已有 {{ workflow_path }}:"
+    if gh api "repos/{{ repo }}/contents/{{ workflow_path }}" >/dev/null 2>&1; then
+      echo "  已存在, 先跟 user 确认是复用还是重铺"
+    else
+      echo "  没有, ok"
+    fi
+    echo "本次要用的临时分支名由你自己定, 形如 <你的 harness 名>/ssh-debug."
+    echo "建议在 dsh-approve-prefix 里放行这条前缀:"
+    echo "  just -f {{ justfile_directory() }}/justfile"
+
+# just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> prep <runner-label> [ref] [timeout-minutes]
+# 开临时 worktree, 按参数生成 workflow, 提交并推送临时分支. 幂等, 重复执行就是重新生成再推一次.
+prep runner ref="HEAD" timeout="30": guard
+    #!/usr/bin/env bash
+    set -euo pipefail
+    wf="{{ wt }}/{{ workflow_path }}"
+    mkdir -p "$(dirname "$wf")"
+    sed -e "s|^ *runs-on:.*|    runs-on: {{ runner }}|" -e "s|^ *timeout-minutes:.*|    timeout-minutes: {{ timeout }}|" "{{ template }}" > "$wf"
+    if [ ! -d "{{ wt }}" ]; then
+      git fetch origin "{{ branch }}" >/dev/null 2>&1 || true
+      if git rev-parse --verify --quiet "refs/remotes/origin/{{ branch }}" >/dev/null; then
+        echo "远端已有 {{ branch }}, 基于它继续 (想从头开始请先 clean)"
+        git worktree add -b "{{ branch }}" "{{ wt }}" "origin/{{ branch }}"
+      else
+        git worktree add -b "{{ branch }}" "{{ wt }}" "{{ ref }}"
+      fi
+    fi
+    git -C "{{ wt }}" add "{{ workflow_path }}"
+    if git -C "{{ wt }}" diff --cached --quiet; then
+      echo "workflow 内容没变, 跳过提交"
+    else
+      git -C "{{ wt }}" commit -m "debug: add upterm ssh workflow"
+    fi
+    git -C "{{ wt }}" push -u origin "{{ branch }}"
+    echo "已推送 {{ branch }} (runs-on={{ runner }}, timeout-minutes={{ timeout }})."
+    echo "接下来: just -f {{ justfile_directory() }}/justfile -d $PWD branch={{ branch }} status"
+
+# just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> status [run-id]
+# 不带 run-id 就列该分支最近的 run; 带 run-id 就打印状态, 各步骤结论与 artifact 列表.
+status run_id="": guard
+    #!/usr/bin/env bash
+    set -euo pipefail
+    id="{{ run_id }}"
+    if [ -z "$id" ]; then
+      gh run list --repo "{{ repo }}" --branch "{{ branch }}" --limit 5 --json databaseId,event,headSha,status,conclusion,createdAt --jq '.[] | "\(.databaseId) \(.event) \(.status)/\(.conclusion // "-") \(.headSha[0:7]) \(.createdAt)"'
+      exit 0
+    fi
+    gh run view "$id" --repo "{{ repo }}" --json status,conclusion,attempt,url
+    gh api "repos/{{ repo }}/actions/runs/$id/jobs" --jq '.jobs[] | .name, (.steps[] | "  \(.number) \(.name) \(.status) \(.conclusion // "-")")'
+    gh api "repos/{{ repo }}/actions/runs/$id/artifacts" --jq '.artifacts[] | "artifact: \(.name), \(.size_in_bytes) bytes"'
+
+# just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> connection [run-id]
+# 取 upterm 连接命令: 下载 artifact 到临时目录并打印.
+connection run_id="": guard
+    #!/usr/bin/env bash
+    set -euo pipefail
+    id="{{ run_id }}"
+    if [ -z "$id" ]; then
+      id="$(gh run list --repo "{{ repo }}" --branch "{{ branch }}" --limit 1 --json databaseId --jq '.[0].databaseId')"
+    fi
+    if [ -z "$id" ]; then
+      echo "这条分支上还没有 run, 先 prep." >&2
+      exit 1
+    fi
+    art="$(gh api "repos/{{ repo }}/actions/runs/$id/artifacts" --jq '[.artifacts[] | select(.name | startswith("upterm-connection-"))] | last | .name // ""')"
+    if [ -z "$art" ]; then
+      echo "run $id 还没有 upterm-connection-* artifact, 先 status $id 看步骤到哪了." >&2
+      exit 1
+    fi
+    rm -rf "{{ conn }}"
+    mkdir -p "{{ conn }}"
+    gh run download "$id" -n "$art" -D "{{ conn }}" --repo "{{ repo }}"
+    cat "{{ conn }}/ssh.txt"
+
+# just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> ssh
+# 交互式连进 runner. 人类终端用; agent 用沙箱内的 ssh 管道, 不走这条.
+ssh: connection
+    @ssh -tt -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="{{ root }}/known-hosts" -o ConnectTimeout=10 "$(sed 's/^ssh //' "{{ conn }}/ssh.txt")"
+
+# just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> done
+# 收工: 先放收工标记, 再退出会话, 让 run 收尾成 success.
+done: connection
+    @{ printf 'touch "$GITHUB_WORKSPACE/.ssh-debug-continue"\n'; sleep 3; printf 'exit\n'; sleep 3; } | ssh -tt -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="{{ root }}/known-hosts" -o ConnectTimeout=10 "$(sed 's/^ssh //' "{{ conn }}/ssh.txt")"
+
+# just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> cancel [run-id]
+# 取消 run; 不给 run-id 就取消该分支最近一次.
+cancel run_id="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    id="{{ run_id }}"
+    if [ -z "$id" ]; then
+      if [ -z "{{ branch }}" ] || [ -z "{{ repo }}" ]; then
+        echo "请给 run-id, 或者传 branch=<harness>/ssh-debug 并在有 origin 的仓库里执行." >&2
+        exit 1
+      fi
+      id="$(gh run list --repo "{{ repo }}" --branch "{{ branch }}" --limit 1 --json databaseId --jq '.[0].databaseId')"
+    fi
+    gh api --method POST "repos/{{ repo }}/actions/runs/$id/cancel"
+    echo "已请求取消 run $id"
+
+# just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> clean
+# 收工清理: 取消还在跑的 run, 删远程临时分支, 移除 worktree, 删本地分支与临时目录.
+clean: guard
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for id in $(gh run list --repo "{{ repo }}" --branch "{{ branch }}" --limit 10 --json databaseId,status --jq '.[] | select(.status != "completed") | .databaseId'); do
+      gh api --method POST "repos/{{ repo }}/actions/runs/$id/cancel" || true
+    done
+    git push origin --delete "{{ branch }}" || true
+    git worktree remove --force "{{ wt }}" || true
+    git branch -D "{{ branch }}" || true
+    rm -rf "{{ root }}"
+    git worktree list
+    echo "已清理 {{ branch }} 与临时目录 {{ root }}"

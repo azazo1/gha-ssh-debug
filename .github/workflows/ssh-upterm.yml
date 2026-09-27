@@ -1,0 +1,18 @@
+name: SSH Debug Upterm
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ssh:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start upterm session
+        uses: owenthereal/action-upterm@v2
+        with:
+          limit-access-to-actor: true
+          wait-timeout-minutes: 15

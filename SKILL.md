@@ -1,5 +1,5 @@
 ---
-name: ssh-debug
+name: gha-ssh-debug
 description: 用 GitHub Actions 开 SSH 连 GitHub-hosted runner. 适用于要调试 CI, 在 runner 上复现构建, 或用 Upterm 拿交互 shell 时.
 ---
 

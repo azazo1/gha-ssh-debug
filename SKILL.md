@@ -34,13 +34,13 @@ workflow 要点:
 - `timeout-minutes` 按任务设. 本仓库现在是 30. GitHub-hosted 上限 6 小时.
 - `runs-on` 必须和要复现的 CI 一致. `macos-15` 编不了依赖 macOS 26 SDK 的代码.
 
-ssh 及其衍生 (scp, rsync) 禁止在沙箱中跑, 必须提权, justification 开头用 `[执行]` / `[只读]`.
+连这个临时 CI 的 Upterm SSH 是特例: 在沙箱内执行, 不提权. 不要套用 AGENTS 里 "ssh 必须提权" 的一般规则.
 
 ## 操作流程
 
 把 `OWNER/REPO` 换成目标仓库.
 
-每条命令写成单条 argv: 不用 `|` / `&&` / `||` / `;` / 重定向 / 后台 / 子 shell. 落盘用 `--output`, 不要 `>`. 轮询拆成多次工具调用, 不要 `for; sleep; done` 包成一条. 这是为了能被会话里的 allow prefix 直接吃掉; 吃不到就正常提权, 不要为了蹭 prefix 改命令.
+每条命令写成单条 argv: 不用 `|` / `&&` / `||` / `;` / 重定向 / 后台 / 子 shell. JSON 直接看命令输出, 不要再重定向. 二进制落盘用该命令自己的目录参数 (例如 `gh run download -D`), 不要 `>`, 也不要给 `gh api` 加不存在的 `--output`. 轮询拆成多次工具调用, 不要 `for; sleep; done` 包成一条. 这是为了能被会话里的 allow prefix 直接吃掉; 吃不到就正常提权, 不要为了蹭 prefix 改命令.
 
 ### 1. 触发
 
@@ -79,20 +79,14 @@ gh api repos/OWNER/REPO/actions/runs/<id>/artifacts
 ### 4. 下载连接命令
 
 ```shell
-gh api repos/OWNER/REPO/actions/artifacts/<artifact_id>/zip --output .tmp/upterm.zip
+gh run download <run_id> -n upterm-connection -D .tmp/upterm --repo OWNER/REPO
 ```
 
-解压是第二条命令, 不要和 `gh api` 用管道拼:
-
-```shell
-python3 -c "import zipfile; zipfile.ZipFile('.tmp/upterm.zip').extractall('.tmp/upterm')"
-```
-
-`ssh.txt` 里是完整 ssh 命令, 例如 `ssh xxxx@uptermd.upterm.dev`.
+只指定一个 `-n` 时, 文件直接进 `-D`, 不会再套一层 artifact 名. 连接命令在 `.tmp/upterm/ssh.txt`.
 
 ### 5. SSH
 
-提权. known_hosts 放到工作区 `.tmp`, 不要污染用户 `~/.ssh`.
+沙箱内执行, 不提权. known_hosts 放到工作区 `.tmp`, 不要写用户 `~/.ssh`.
 
 ```shell
 ssh -tt \
@@ -144,7 +138,7 @@ gh api --method POST repos/OWNER/REPO/actions/runs/<id>/cancel
 
 - **拿不到连接命令**: attached 模式; 或等 `gh run view --log`. 必须 detached + artifact.
 - **`gh run watch`**: 在 agent 无 TTY 后台会空转, 成功了也不退出. 人类终端才用. 轮询用多次 `gh api` / `gh run view --json`.
-- **命令形态被拼坏**: `gh api foo > file`, `gh api foo | jq`, `for i in; do gh api; done` 都不再是单条 argv, allow prefix 吃不到, 每次都要审批. 拆调用, 写文件用 `--output`.
+- **命令形态被拼坏**: `gh api foo > file`, `gh api foo | jq`, `for i in; do gh api; done` 都不再是单条 argv, allow prefix 吃不到, 每次都要审批. 拆调用. `gh api` 没有 `--output`, 二进制用 `gh run download -D`.
 - **误杀会话**: 管道末尾 `exit`, 或 `Ctrl-D`. 表现为随后 `Permission denied (publickey)`, 同时 job 还在 `Wait for continue marker`.
 - **history expansion**: `echo STARTED $!` 变成 `bash: !: event not found`, 后台脚本根本没起来.
 - **heredoc 在共享 PTY 里乱**: 回放 + 折行会把脚本写坏. 用 base64 单行传输.
@@ -157,7 +151,7 @@ gh api --method POST repos/OWNER/REPO/actions/runs/<id>/cancel
 ## 不要做
 
 - 不要为了 SSH 去改目标项目的 workflow (除非用户明确允许).
-- 不要在沙箱里跑 ssh/scp.
+- 不要把这条特例扩到别的 ssh/scp. 只有连这个临时 CI 的 Upterm 可以沙箱内不提权.
 - 不要 `gh run watch` 当后台等待.
 - 不要把 wormhole 当成开 SSH 的方法, 它只是连上之后传文件.
 - 不要安装用户级软件; runner 上为了跑 CI 装项目依赖可以.

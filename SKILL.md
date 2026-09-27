@@ -165,6 +165,7 @@ gh api --method DELETE repos/OWNER/REPO/actions/artifacts/<artifact-id>
 - **`prep` 报 `-d` 指到了 worktree**: recipe 要的是主工作树根目录 (`-d` 的值等于 `git rev-parse --show-toplevel`, 且该目录下 `.git` 是目录而不是文件).
 - **前缀匹配不上**: 提醒 user 时用的路径字面量必须和你调用 `-f` 时用的完全一致, 所以自己一律用绝对路径. 路径里有空格也会让匹配变复杂, 尽量别放这种目录.
 - **`gh` 并非全都免提权**: 公开仓库的 REST 读 (`gh run list`, `gh api repos/...`) 在沙箱内未认证也能跑, 但 artifact 下载 (`gh run download`) 与 GraphQL (`gh repo view`) 必须认证. 所以 recipe 一律按提权执行, 不要自作主张降级到沙箱.
+- **别用命令行覆盖派生变量**: `root` / `wt` / `conn` / `workflow_path` / `template` 都是按 `branch` 推导出来的, 而 just 允许覆盖任何顶层变量; 一旦覆盖, `clean` 里的 `rm -rf` 就可能落到别处. `guard` 会重新推导一遍并拒绝不一致的调用 (exit 6), 看到这个错不要绕, 要换路径就改 justfile.
 - **命令形态被拼坏**: `gh api foo > file`, `gh api foo | jq`, `for i in; do gh api; done` 都不是单条 argv, 会话里的 allow prefix 吃不到, 每次都要审批. 需要提权的动作走 recipe, 不要临时拼长命令.
 - **标记文件撞名**: 目标 repo 里正好有 `.ssh-debug-continue` 的话, job 起来就会直接收工; 遇到就换名字并同步改 workflow 里那行.
 - **月限额**: 只有私有仓库扣分钟 (Free 约 2000 分钟/月, macOS 10 倍), 公开仓库不扣.

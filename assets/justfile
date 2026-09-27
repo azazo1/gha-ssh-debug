@@ -12,6 +12,9 @@
 #
 # 这些 recipe 要写目标 repo 的 .git 并访问 gh 凭据, 所以调用时要提权.
 # 在 dsh-approve-prefix 里放行 `just -f <本 skill 目录>/assets/justfile` 即可自动通过, 适合无人值守执行.
+#
+# 除 branch 之外不要用命令行覆盖其它变量: just 允许覆盖任何顶层变量, 而 root/wt/conn 这些
+# 派生路径一动, rm -rf 就可能落到别处, 所以 guard 会拿 branch 重新推导一遍来核对, 对不上就报错.
 
 branch := env("SSH_DEBUG_BRANCH", "")
 slug := replace(branch, "/", "-")
@@ -28,7 +31,7 @@ repo := `git remote get-url origin 2>/dev/null | sed -E 's#^git@[^:]+:##; s#^ssh
 default:
     @just --list
 
-# 检查 branch, cwd 与 origin remote.
+# 检查 branch 与 cwd, 并核对派生变量没有被命令行覆盖.
 [private]
 guard:
     #!/usr/bin/env bash
@@ -37,6 +40,12 @@ guard:
       echo "未指定临时分支名: 请传 branch=<harness>/ssh-debug, 例如 branch=claude/ssh-debug." >&2
       exit 1
     fi
+    case "{{ branch }}" in
+      *[!A-Za-z0-9._/-]*)
+        echo "分支名只允许字母, 数字和 . _ / - : {{ branch }}" >&2
+        exit 5
+        ;;
+    esac
     if [ -z "{{ repo }}" ]; then
       echo "从 origin 推不出 OWNER/REPO: 先给目标 repo 配好 origin remote, 或者用 -d 指对目录." >&2
       exit 2
@@ -49,6 +58,19 @@ guard:
       echo "当前目录是个 worktree, 不是主工作树: 请把 -d 指到主工作树根目录." >&2
       exit 4
     fi
+    check_var() {
+      if [ "$2" != "$3" ]; then
+        echo "变量 $1 和 branch 推导出来的值对不上: 期望 $3, 实际 $2." >&2
+        echo "这些派生变量不要在命令行覆盖, 需要改就改 justfile." >&2
+        exit 6
+      fi
+    }
+    expected_root=".tmp/ssh-debug-$(printf '%s' "{{ branch }}" | tr '/' '-')"
+    check_var root "{{ root }}" "$expected_root"
+    check_var wt "{{ wt }}" "$expected_root/worktree"
+    check_var conn "{{ conn }}" "$expected_root/upterm"
+    check_var workflow_path "{{ workflow_path }}" ".github/workflows/ssh-debug-upterm.yml"
+    check_var template "{{ template }}" "{{ justfile_directory() }}/ssh-debug-upterm.yml"
 
 # just -f <本 skill 目录>/assets/justfile -d <目标 repo> check
 # 只读体检: 目标仓库, 依赖状态, 上次残留, 以及建议配置的 allow prefix.
@@ -154,6 +176,13 @@ connection run_id="": guard
       echo "run $id 还没有 upterm-connection-* artifact, 先 status $id 看步骤到哪了." >&2
       exit 1
     fi
+    case "{{ conn }}" in
+      .tmp/ssh-debug-*/upterm) ;;
+      *)
+        echo "拒绝动 {{ conn }}: 不在预期的 .tmp/ssh-debug-*/upterm 之下." >&2
+        exit 7
+        ;;
+    esac
     rm -rf "{{ conn }}"
     mkdir -p "{{ conn }}"
     gh run download "$id" -n "$art" -D "{{ conn }}" --repo "{{ repo }}"
@@ -196,6 +225,13 @@ clean: guard
     git push origin --delete "{{ branch }}" || true
     git worktree remove --force "{{ wt }}" || true
     git branch -D "{{ branch }}" || true
+    case "{{ root }}" in
+      .tmp/ssh-debug-*) ;;
+      *)
+        echo "拒绝删除 {{ root }}: 不在预期的 .tmp/ssh-debug-* 之下." >&2
+        exit 7
+        ;;
+    esac
     rm -rf "{{ root }}"
     git worktree list
     echo "已清理 {{ branch }} 与临时目录 {{ root }}"

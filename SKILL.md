@@ -41,6 +41,7 @@ just -f <本 skill 目录>/assets/justfile
 ```
 
 - `<本 skill 目录>` 用**你实际调用时的绝对路径字面量**: 自己解析出来, 提醒 user 时用同一个字面量, 否则前缀匹配不上. 所以你自己调用时也一律用绝对路径 (`-f` 后面不要写相对路径).
+- 命令必须**整条就只是那一条 `just ...`**: 不要在前面加 `cd`, 不要在后面接 `;` 或 `echo` 之类第二件事, 也不要夹管道和重定向. 要指定目录就用工具自己的工作目录参数.
 - 之所以不建议用宽前缀 `just`: 那样任何以 `just` 开头的命令都会自动放行, 等于把提权执行任意命令的授权交出去.
 - 前缀没配也不影响功能, 只是每次调用都要 user 点一次审批. 不要为了绕开审批去改命令形态.
 
@@ -129,6 +130,12 @@ just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> cancel [run-id]
 
 不给 run-id 就取消该分支最近一条. 被取消时 action 的 post 步骤会被跳过, job 立刻收尾 (实测变成 `completed / cancelled`).
 
+`clean` 不动 Actions 历史: run 记录会留着, artifact 90 天后自动过期. 想连 artifact 一起删:
+
+```shell
+gh api --method DELETE repos/OWNER/REPO/actions/artifacts/<artifact-id>
+```
+
 ## recipe 一览
 
 | recipe | 作用 |
@@ -157,6 +164,7 @@ just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> cancel [run-id]
 - **`prep` 报 `.tmp/` 未被忽略**: worktree 会污染主工作树的 `git status`. 先往目标 repo 的 `.gitignore` 补一条 `.tmp/` (这个改动要 user 点头).
 - **`prep` 报 `-d` 指到了 worktree**: recipe 要的是主工作树根目录 (`-d` 的值等于 `git rev-parse --show-toplevel`, 且该目录下 `.git` 是目录而不是文件).
 - **前缀匹配不上**: 提醒 user 时用的路径字面量必须和你调用 `-f` 时用的完全一致, 所以自己一律用绝对路径. 路径里有空格也会让匹配变复杂, 尽量别放这种目录.
+- **`gh` 并非全都免提权**: 公开仓库的 REST 读 (`gh run list`, `gh api repos/...`) 在沙箱内未认证也能跑, 但 artifact 下载 (`gh run download`) 与 GraphQL (`gh repo view`) 必须认证. 所以 recipe 一律按提权执行, 不要自作主张降级到沙箱.
 - **命令形态被拼坏**: `gh api foo > file`, `gh api foo | jq`, `for i in; do gh api; done` 都不是单条 argv, 会话里的 allow prefix 吃不到, 每次都要审批. 需要提权的动作走 recipe, 不要临时拼长命令.
 - **标记文件撞名**: 目标 repo 里正好有 `.ssh-debug-continue` 的话, job 起来就会直接收工; 遇到就换名字并同步改 workflow 里那行.
 - **月限额**: 只有私有仓库扣分钟 (Free 约 2000 分钟/月, macOS 10 倍), 公开仓库不扣.

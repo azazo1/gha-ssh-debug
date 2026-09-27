@@ -1,0 +1,65 @@
+# 临时 SSH 调试 workflow, 由 gha-ssh-debug skill 复制到目标 repo 的临时分支上.
+# 用完连分支一起删掉, 不要留在默认分支.
+
+# 为什么用 push 触发: workflow_dispatch 只对"已存在于默认分支"的 workflow 生效
+# (实测报错 404 workflow xxx not found on the default branch), 而 push 事件在非默认
+# 分支上照常触发, 于是 push 临时分支就能起 run, 默认分支完全不用碰.
+# 这个文件只要成功跑过一次就会被注册, 之后可以再用同样的路径 dispatch 开新会话.
+# push 刻意不写 branches 过滤: 这份文件在哪条分支上, 哪条分支的 push 就会拉起它.
+# 写死分支名反而会因为名字对不上而静默不触发.
+
+# 复制到目标 repo 前按目标 CI 改这几处:
+#   runs-on:         目标 CI 用的 runner label, 必须一致, 否则复现没有意义
+#   timeout-minutes: 按任务设, 这里是 30; GitHub-hosted 上限 6 小时
+#   fetch-depth:     目标 CI 需要 git 历史 (例如脚本里 git rev-list --count) 就用 0
+#   submodules:      目标 CI 需要子模块就打开注释
+
+name: SSH Debug Upterm
+
+on:
+  # 首次会话靠 push 触发, 这也是唯一能绕开默认分支限制的入口
+  push:
+  # 这份文件跑过一次之后就能直接 dispatch 重开会话, 不必再 push
+  workflow_dispatch:
+
+jobs:
+  ssh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # submodules: recursive
+
+      - name: Start upterm session
+        id: upterm
+        uses: owenthereal/action-upterm@v2
+        with:
+          limit-access-to-actor: true
+          detached: true
+          wait-timeout-minutes: 15
+
+      - name: Save connection info
+        run: |
+          echo "${{ steps.upterm.outputs.ssh-command }}" > ssh.txt
+          cat ssh.txt
+
+      - name: Upload connection info
+        uses: actions/upload-artifact@v4
+        with:
+          name: upterm-connection-${{ github.run_attempt }}
+          path: ssh.txt
+          if-no-files-found: error
+
+      - name: Wait for continue marker
+        run: |
+          echo "workspace: $GITHUB_WORKSPACE"
+          echo "调试结束时在 runner 上执行: touch $GITHUB_WORKSPACE/.ssh-debug-continue"
+          until [ -f "$GITHUB_WORKSPACE/.ssh-debug-continue" ]; do
+            sleep 5
+          done
+          echo "marker 已出现, job 收工"

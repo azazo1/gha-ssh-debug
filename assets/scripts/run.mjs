@@ -13,7 +13,7 @@ import { buildContext, parseArgs } from "./lib/context.mjs";
 import { fail, info, warn } from "./lib/log.mjs";
 import { ensureConnection, sshArgsFor } from "./lib/session.mjs";
 import { queryRemote } from "./lib/session-run.mjs";
-import { runScp, scpArgs } from "./lib/transfer.mjs";
+import { remoteFileSize, resolveScpResult, runScp, scpArgs } from "./lib/transfer.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -86,20 +86,33 @@ runMain(async () => {
 
   // 1. 传脚本. 走 scp 而不是 PTY, 免得长行被折行截断.
   info(`上传脚本 ${scriptPath} -> ${session.host}:${job.script}`);
+  const localSize = statSync(scriptPath).size;
   const upload = runScp([...scpArgs(session), scriptPath, `${session.user}@${session.host}:${job.script}`]);
   if (!upload.ok) {
-    fail(1, `上传脚本失败 (退出码 ${upload.status}): ${upload.stderr || "没有 stderr"}`);
+    // 这里不能像 push 那样"核验不出来也放过": 脚本没到手后面一定跑不起来, 得当场说清.
+    const remoteSize = await remoteFileSize(session, job.script);
+    resolveScpResult(upload, {
+      remote: remoteSize === null ? null : { count: 1, bytes: remoteSize },
+      local: { count: 1, bytes: localSize },
+      describe: () => `本地脚本 ${localSize} 字节, runner 上 ${job.script} ${remoteSize === null ? "读不到大小" : `${remoteSize} 字节`}`,
+      onInconclusive: "fail",
+    });
   }
 
   // 2. 起后台任务. 退出码单独写文件, 这样才能跟日志分开判断.
   //    包一层 wrapper 而不是直接 nohup 用户脚本, 是为了在脚本跑完后把退出码留下来.
   //    内容只有三行, 用 base64 单行写过去 (heredoc 在共享 PTY 里靠不住).
+  //
+  //    setsid 只在 Linux 上有; macOS 没有这个命令 (它不是 POSIX 的一部分), runner 上直接
+  //    报 setsid: command not found, 后台任务根本起不来. 所以有就用, 没有就靠 nohup + disown.
   const wrapperBody = ["#!/usr/bin/env bash", `bash ${job.script}`, `echo $? > ${job.exit}`].join("\n");
   const wrapperB64 = Buffer.from(wrapperBody, "utf8").toString("base64");
   const launchScript = [
     `echo ${wrapperB64} | base64 -d > ${job.wrapper}`,
     `chmod +x ${job.wrapper}`,
-    `setsid nohup bash ${job.wrapper} > ${job.log} 2>&1 < /dev/null &`,
+    "SETSID=''",
+    "command -v setsid >/dev/null 2>&1 && SETSID=setsid",
+    `$SETSID nohup bash ${job.wrapper} > ${job.log} 2>&1 < /dev/null &`,
     "disown 2>/dev/null || true",
     "echo LAUNCHED",
   ].join("\n");

@@ -30,7 +30,7 @@
 ## 文件传输
 
 - **`pull` / `push` 报 exit 8**: 会话走的是 `ws://` / `wss://` 中继 (连接命令里带 `ProxyCommand`), 上游在这种 server 上不提供 SFTP. 换直连 `ssh://` 的 server, 或者改走 artifact.
-- **`pull` / `push` 报 scp 退出码非零, 但脚本说核验通过**: 这是 upterm 的 SFTP 通道收尾时报的假失败, 文件是完整的, 按成功处理即可.
+- **`pull` / `push` 报 scp 退出码非零, 但随后说核验通过**: 这是 upterm 的 SFTP 通道收尾时报的假失败, 文件是完整的, 按成功处理即可. 核验不出来时 `push` / `pull` 也会先放过 (提示你自己比一下字节数), 因为把已经落地的传输判死更糟; `run` 不一样, 它核验不出来就中止 —— 脚本没到手, 后面一定跑不起来.
 - **scp 报 publickey 被拒**: 通道用的还是触发者那把私钥, 和 ssh 会话同一套限制, 本机私钥得登记在触发者账号上.
 - **会话结束后才想起来取产物**: SFTP 通道已经没了. 回到 artifact 那条路: 在模板里加一个 `actions/upload-artifact` 步骤, 收工后用 `gh run download` 拉下来 (`connection` 里就是这么下载 `ssh.txt` 的).
 

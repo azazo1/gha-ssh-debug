@@ -10,7 +10,7 @@ import { runMain } from "./lib/cli.mjs";
 import { buildContext, parseArgs } from "./lib/context.mjs";
 import { fail, info } from "./lib/log.mjs";
 import { ensureConnection } from "./lib/session.mjs";
-import { handleScpFailure, localStats, remoteStats, runScp, scpArgs } from "./lib/transfer.mjs";
+import { localStats, remoteStats, resolveScpResult, runScp, scpArgs } from "./lib/transfer.mjs";
 
 function describeDir(dir) {
   if (!existsSync(dir)) return "  (空)";
@@ -44,13 +44,14 @@ runMain(async () => {
   if (!result.ok) {
     // 这一趟的落点按 scp 的语义推: 目录会落成 dest/<basename>, 单文件也是 dest/<basename>.
     const landed = path.join(dest, path.basename(remote.replace(/\/+$/, "")));
-    const remote2 = await remoteStats(session, remote);
     const local2 = localStats(existsSync(landed) ? landed : dest);
-    handleScpFailure(result, {
+    const remote2 = await remoteStats(session, remote, { kind: local2 && local2.kind });
+    resolveScpResult(result, {
       remote: remote2,
       local: local2,
       describe: () =>
         `runner 上 ${remote} 是 ${remote2 ? `${remote2.kind} ${remote2.count} 个文件 / ${remote2.bytes} 字节` : "未知"}, 本地 ${local2 ? `${local2.count} 个文件 / ${local2.bytes} 字节` : "未知"}`,
+      onInconclusive: "warn",
     });
   }
 

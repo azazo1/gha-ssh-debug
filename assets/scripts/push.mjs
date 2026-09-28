@@ -6,7 +6,7 @@ import { runMain } from "./lib/cli.mjs";
 import { buildContext, parseArgs } from "./lib/context.mjs";
 import { fail, info } from "./lib/log.mjs";
 import { ensureConnection } from "./lib/session.mjs";
-import { handleScpFailure, localStats, remoteStats, runScp, scpArgs } from "./lib/transfer.mjs";
+import { localStats, remoteStats, resolveScpResult, runScp, scpArgs } from "./lib/transfer.mjs";
 
 runMain(async () => {
   const { options, rest } = parseArgs(process.argv.slice(2));
@@ -25,13 +25,15 @@ runMain(async () => {
   const result = runScp([...scpArgs(session), localPath, `${session.user}@${session.host}:${remote}`]);
 
   if (!result.ok) {
+    // 本地这一侧知道是文件还是目录, 把它告诉核验, 免得它两条路都试一遍.
     const local2 = localStats(localPath);
-    const remote2 = await remoteStats(session, remote);
-    handleScpFailure(result, {
+    const remote2 = await remoteStats(session, remote, { kind: local2 && local2.kind });
+    resolveScpResult(result, {
       remote: remote2,
       local: local2,
       describe: () =>
         `本地 ${local2 ? `${local2.count} 个文件 / ${local2.bytes} 字节` : "未知"}, runner 上 ${remote} 是 ${remote2 ? `${remote2.kind} ${remote2.count} 个文件 / ${remote2.bytes} 字节` : "未知"}`,
+      onInconclusive: "warn",
     });
   }
 

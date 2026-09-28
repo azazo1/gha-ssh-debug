@@ -1,6 +1,6 @@
 ---
 name: gha-ssh-debug
-description: 在正在工作的仓库里借一个 GitHub-hosted runner 开 Upterm SSH 会话, 用于调试 CI, 在 runner 上复现构建, 或要一个和目标 CI 一致的交互 shell. 需要能向该仓库推分支.
+description: 在正在工作的仓库里借一个 GitHub-hosted runner 开 Upterm SSH 会话, 用于调试 CI, 在 runner 上复现构建, 把 runner 上的构建产物 scp 拉回本地, 或要一个和目标 CI 一致的交互 shell. 需要能向该仓库推分支.
 ---
 
 # GitHub Actions SSH 调试
@@ -21,6 +21,7 @@ GitHub-hosted runner 没有入站端口, 从外面连不进去. 唯一的办法�
 ## 前置条件
 
 - 目标 repo 你有 push 权限, `gh` 已登录该账号.
+- 本机装了 `just`, 以及 `node` (recipe 的实现是 node 脚本, 见下面 "实现结构").
 - 本机 SSH 私钥已登记在触发者 GitHub 账号上: 模板里 `limit-access-to-actor: true` 只放触发者本人的公钥进来, 否则连上会被 `Permission denied (publickey)` 挡住.
 - 目标 repo 没关 Actions, 要复现的 job 跑在 GitHub-hosted runner 上.
 - 对没有 push 权限的第三方仓库用不了 (流程要在对方仓库推临时分支), 那种情况只能先 fork 到自己账号再走同样流程.
@@ -84,33 +85,50 @@ just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> connection
 
 下载到 `.tmp/ssh-debug-<slug>/upterm/ssh.txt` 并打印, 内容是 `ssh <user>@uptermd.upterm.dev`.
 
-### 4. SSH 连进去 (agent)
+### 4. 在会话里干活 (agent)
 
-这一步**在沙箱内执行, 不提权**, 所以命令形态不受 allow prefix 限制, 管道随便用. 连临时 CI 的 Upterm 是本 skill 的特例, 不要套用 AGENTS 里 "ssh 必须提权" 的一般规则.
+**agent 不要在 shell 里手工拼 ssh 管道**, 走 `exec`:
 
 ```shell
-{ printf 'echo MARKER_<ts>\n'; printf '<命令>\n'; sleep 12; } | ssh -tt \
-  -o StrictHostKeyChecking=accept-new \
-  -o UserKnownHostsFile=<你能写的目录>/.tmp/ssh-debug-known-hosts \
-  -o BatchMode=yes \
-  -o ConnectTimeout=10 <user@host>
+just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> exec <本地脚本> [run-id]
 ```
 
-known_hosts 放在你自己能写的目录 (例如会话工作区的 `.tmp/`), 不要写 `~/.ssh`, 也不要想写目标 repo 的 `.tmp/` (沙箱不允许).
+把要跑的命令写进一个本地脚本, `exec` 负责连上去, 打一个带时间戳的标记, 逐行喂进会话里的 shell, 等够了再断, 最后只把**本次标记之后**的输出打出来.
 
-### 5. 在会话里干活
+两条硬性约束:
+
+- **打完命令不能马上断**, 否则新命令可能根本没执行. 默认等 12 秒, 急的话用环境变量 `SSH_DEBUG_HOLD_MS` 调.
+- **工作途中不要 `exit` / `Ctrl-D`**: 会话一结束就彻底没了, 只能重新开一次 run 从头来. `exec` 断开客户端是安全的, 结束会话不是.
+
+人类终端要交互, 用 `ssh` 那条 (`just ... ssh`), 它直接把终端交给你.
+
+### 5. 会话里的注意事项
 
 Upterm 是共享 PTY, 不是普通 sshd:
 
-- 不要指望 `ssh host 'remote command'` 稳定执行, 用管道把命令打进已经开着的 shell.
-- 连上会先回放整段终端缓冲. 命令前打一个带时间戳的标记 (`echo MARKER_<ts>`), 在本地输出里从**本次**标记往后截取.
-- 打完命令别马上关管道, 停 10 秒以上再关, 否则新命令可能根本没执行.
+- 不要指望 `ssh host 'remote command'` 稳定执行, 用 `exec` 把命令打进已经开着的 shell.
+- 连上会先回放整段终端缓冲, 所以 `exec` 先用标记划界, 从**本次**标记往后截取; 直接用 `ssh` 手工看输出时也要这么做.
 - 关掉本地 ssh 客户端 != 关会话, 会话还在, 随时可以重连.
-- **工作途中不要 `exit` / `Ctrl-D`**: 会话一结束就彻底没了, 只能重新开一次 run 从头来. 断开客户端是安全的, 结束会话不是.
 - 远程 bash 可能开着 history expansion, 不要发 `$!`.
-- 长任务: 脚本 base64 成单行打过去, `nohup bash /tmp/job.sh > /tmp/job.log 2>&1 &` 再加 `disown`, 日志写文件不要刷共享终端. 查进度就重连, 打标记, `tail` 日志文件, 在本地输出里从本次标记往后截取.
+- 长任务: 脚本 base64 成单行打过去, `nohup bash /tmp/job.sh > /tmp/job.log 2>&1 &` 再加 `disown`, 日志写文件不要刷共享终端. 查进度就再 `exec` 一次 `tail` 那个日志文件.
 
-### 6. 收工
+### 6. 取构建产物 (可选)
+
+会话还活着的时候, runner 上的目录可以整块往外拿. upterm 从 v0.22.0 起在直连的 `ssh://` server 上带 SFTP 通道, 而 `action-upterm` 又是以 `--accept` 启动会话的 (上游源码里这个开关直接挂自动放行, 不走弹窗审批), 所以没有显示器的 CI 里 scp 照样能用:
+
+```shell
+just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> pull <runner 上的路径> [本地目录] [run-id]
+```
+
+- 路径按 runner 上的绝对路径给 (`$GITHUB_WORKSPACE` 就是仓库检出目录), 给目录就整棵拷回来.
+- 不给本地目录就落在 `.tmp/ssh-debug-<slug>/pull/` 下.
+- 必须在会话还活着时用; 会话结束 (job 收尾) 之后通道就没了.
+- 反方向是 `push`, 可以把本地文件送进 runner. 大文件两头都慢, 别拿它当依赖缓存的搬运工.
+- 只有直连 `ssh://` 的 server 有这条通道: 如果 `connection` 吐出来的是 `ssh -o ProxyCommand=...` 形式 (走了 ws/wss), 上游在这种 server 上不提供 SFTP, `pull` / `push` 会直接报错 (exit 8), 这种情况改用下面的 artifact.
+
+要留档, 或者会话已经结束才想起来取产物, 就回到 artifact 那条路: 在模板里加一个 `actions/upload-artifact` 步骤把产物传上去, 收工后用 `gh run download` 拉下来 (`connection` 里就是这么下载 `ssh.txt` 的). artifact 默认留 90 天, 代价是必须等步骤跑到.
+
+### 7. 收工
 
 ```shell
 just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> done
@@ -144,12 +162,28 @@ gh api --method DELETE repos/OWNER/REPO/actions/artifacts/<artifact-id>
 | `prep <runner> [ref] [timeout-minutes]` | 开临时 worktree, 生成 workflow (替换 `runs-on` 与 `timeout-minutes`), 提交并推送 |
 | `status [run-id]` | 不带 id 列该分支最近的 run; 带 id 打印状态, 步骤结论与 artifact |
 | `connection [run-id]` | 下载 `upterm-connection-*` artifact 到临时目录并打印连接命令 |
+| `exec <本地脚本> [run-id]` | 把脚本喂进会话并取回这段输出 (agent 在会话里干活走这条) |
+| `pull <runner 路径> [本地目录] [run-id]` | 会话活着时把 runner 上的文件或目录 scp 拉回本地 |
+| `push <本地路径> <runner 路径> [run-id]` | 反过来把本地文件送进 runner |
 | `done` | 收工: 放标记并退出会话, 让 run 收尾成 `success` |
 | `cancel [run-id]` | 取消 run |
 | `clean` | 取消残留 run, 删远程分支, 移除 worktree, 删本地分支与临时目录 |
-| `ssh` | 交互式连进去, 人类终端用 (agent 走沙箱内的 ssh 管道) |
+| `ssh [run-id]` | 交互式连进去, 人类终端用 (agent 走 `exec`) |
 
 调用形态统一是 `just -f <skill>/assets/justfile -d <目标 repo 主工作树> branch=<branch> <recipe> [参数]`.
+
+## 实现结构
+
+justfile 只做派发, 每个 recipe 是一行 `node <脚本>` 调用, 逻辑全在 `assets/scripts/`:
+
+- `assets/scripts/lib/`: `log.mjs` (输出与退出码), `run.mjs` (执行外部命令), `context.mjs` (参数解析, branch 与 cwd 校验, 派生路径), `gh.mjs` (gh 调用与连接命令解析), `session.mjs` (下 artifact, 取连接信息, 拼 ssh 参数), `session-run.mjs` (喂命令进共享 PTY 并按标记截输出), `cli.mjs` (入口包装).
+- `assets/scripts/*.mjs`: 每个 recipe 一个, 名字对应.
+
+为什么不用 bash 写 recipe:
+
+- just 的 shebang recipe 在 Windows 上不被支持 (手册明说 Windows 不支持 shebang, 会把首行拆成命令再调用), 用 `#!/usr/bin/env bash` 就把整个 skill 锁死在 Unix. 现在的 recipe 是一行普通命令, Unix 走 `sh`, Windows 走 `cmd`, 都不需要 bash.
+- 命令行里的引号交给 just 的 `quote()` 处理, 路径带空格也拆不坏.
+- 要在 Windows 上用, 前提只有一条: `node` 在 PATH 上. `gh` / `git` / `ssh` / `scp` 本来就是各平台的常规安装.
 
 ## 踩坑
 
@@ -164,18 +198,19 @@ gh api --method DELETE repos/OWNER/REPO/actions/artifacts/<artifact-id>
 - **`prep` 报 `.tmp/` 未被忽略**: worktree 会污染主工作树的 `git status`. 先往目标 repo 的 `.gitignore` 补一条 `.tmp/` (这个改动要 user 点头).
 - **`prep` 报 `-d` 指到了 worktree**: recipe 要的是主工作树根目录 (`-d` 的值等于 `git rev-parse --show-toplevel`, 且该目录下 `.git` 是目录而不是文件).
 - **前缀匹配不上**: 提醒 user 时用的路径字面量必须和你调用 `-f` 时用的完全一致, 所以自己一律用绝对路径. 路径里有空格也会让匹配变复杂, 尽量别放这种目录.
-- **`gh` 并非全都免提权**: 公开仓库的 REST 读 (`gh run list`, `gh api repos/...`) 在沙箱内未认证也能跑, 但 artifact 下载 (`gh run download`) 与 GraphQL (`gh repo view`) 必须认证. 所以 recipe 一律按提权执行, 不要自作主张降级到沙箱.
-- **别用命令行覆盖派生变量**: `root` / `wt` / `conn` / `workflow_path` / `template` 都是按 `branch` 推导出来的, 而 just 允许覆盖任何顶层变量; 一旦覆盖, `clean` 里的 `rm -rf` 就可能落到别处. `guard` 会重新推导一遍并拒绝不一致的调用 (exit 6), 看到这个错不要绕, 要换路径就改 justfile.
-- **命令形态被拼坏**: `gh api foo > file`, `gh api foo | jq`, `for i in; do gh api; done` 都不是单条 argv, 会话里的 allow prefix 吃不到, 每次都要审批. 需要提权的动作走 recipe, 不要临时拼长命令.
+- **`gh` 并非全都免提权**: 公开仓库的 REST 读 (`gh run list`, `gh api repos/...`) 未认证也能跑, 但 artifact 下载 (`gh run download`) 与 GraphQL (`gh repo view`) 必须认证. 所以 recipe 一律按提权执行, 不要自作主张降级.
+- **别想着从命令行改路径**: `root` / `wt` / `conn` 这些派生路径只由 `branch` 推导, 全部在 `assets/scripts/lib/context.mjs` 里算出来, 命令行传不进去. 所以 `clean` 里的删除目标不可能被外部改到别处. 要换路径就改那个文件.
+- **命令形态被拼坏**: `gh api foo > file`, `gh api foo | jq`, `for i in; do gh api; done` 都不是单条 argv, 会话里的 allow prefix 吃不到, 每次都要审批. 需要提权的动作走 recipe, 不要临时拼长命令. 同理, **自己验证 recipe 时也别为看图方便加 `| head` / `2>&1`**, 那会让命令掉出前缀, 无人值守时直接卡住; 要截断就让 recipe 自己去做 (脚本里的 `--jq` 与过滤都是进程内的事, 不污染命令形态).
 - **标记文件撞名**: 目标 repo 里正好有 `.ssh-debug-continue` 的话, job 起来就会直接收工; 遇到就换名字并同步改 workflow 里那行.
-- **月限额**: 只有私有仓库扣分钟 (Free 约 2000 分钟/月, macOS 10 倍), 公开仓库不扣.
+- **`pull` / `push` 报 exit 8**: 会话是走 `ws://` / `wss://` 中继的 (连接命令里带 `ProxyCommand`), 上游在这种 server 上关掉了 SFTP. 换直连 `ssh://` 的 server, 或者改走 artifact.
+- **`pull` / `push` 报 publickey 被拒**: 通道用的还是触发者那把私钥, 和 ssh 会话同一套限制, 本机私钥得登记在触发者账号上.
 
 ## 不要做
 
 - 不要把调试文件提交到目标 repo 的默认分支.
 - 不要动目标 repo 自己的 CI (除非 user 明确允许), 也不要 commit / push 与调试无关的改动.
 - 不要用固定分支名, 也不要在同一 repo 里同时留两份调试 worktree.
-- 不要把这条 ssh 特例扩到别的 ssh / scp.
+- 不要在 shell 里手工拼 ssh 管道连会话; 用 `exec`. 这条只适用于本 skill 的 upterm 会话, 不要扩到别的 ssh / scp.
 - 不要 `gh run watch` 当后台等待.
 - 不要安装用户级软件; runner 上为了跑 CI 装项目依赖可以.
 - 不要读目标 repo 的密钥 / `*password*` / 未授权配置.

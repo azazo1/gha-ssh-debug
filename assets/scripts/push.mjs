@@ -1,6 +1,6 @@
 // push: 会话还活着时把本地文件送进 runner, 供 CI 复现使用.
 
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 
 import { runMain } from "./lib/cli.mjs";
 import { buildContext, parseArgs } from "./lib/context.mjs";
@@ -18,6 +18,9 @@ runMain(async () => {
   }
   if (!existsSync(localPath)) {
     fail(1, `本地路径不存在: ${localPath}`);
+  }
+  if (!statSync(localPath).isFile()) {
+    fail(1, `push 只支持单个本地文件: ${localPath}`);
   }
 
   const session = await ensureConnection(ctx, runId);

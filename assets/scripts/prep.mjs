@@ -40,9 +40,17 @@ runMain(() => {
     }
     tryRun("git", ["fetch", "origin", ctx.branch]);
     const hasRemote = tryRun("git", ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${ctx.branch}`]).ok;
+    const hasLocal = tryRun("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${ctx.branch}`]).ok;
     if (hasRemote) {
       info(`远端已有 ${ctx.branch}, 基于它继续 (想从头开始请先 clean)`);
-      runCmd("git", ["worktree", "add", "-b", ctx.branch, ctx.wt, `origin/${ctx.branch}`]);
+      if (hasLocal) {
+        runCmd("git", ["worktree", "add", ctx.wt, ctx.branch]);
+      } else {
+        runCmd("git", ["worktree", "add", "-b", ctx.branch, ctx.wt, `origin/${ctx.branch}`]);
+      }
+    } else if (hasLocal) {
+      info(`本地已有 ${ctx.branch}, 复用该分支 (想从头开始请先 clean)`);
+      runCmd("git", ["worktree", "add", ctx.wt, ctx.branch]);
     } else {
       runCmd("git", ["worktree", "add", "-b", ctx.branch, ctx.wt, ref]);
     }

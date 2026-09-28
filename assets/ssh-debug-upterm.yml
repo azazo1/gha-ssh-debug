@@ -43,23 +43,26 @@ jobs:
           detached: true
           wait-timeout-minutes: 15
 
+      # 连接信息写 $RUNNER_TEMP, 不要写进检出目录: 目标 CI 里常见 `git status --porcelain`
+      # 之类的干净工作区判断, 往 workspace 里丢文件会让版本号带 +, 复现出来的产物就失真了.
       - name: Save connection info
         run: |
-          echo "${{ steps.upterm.outputs.ssh-command }}" > ssh.txt
-          cat ssh.txt
+          echo "${{ steps.upterm.outputs.ssh-command }}" > "$RUNNER_TEMP/ssh.txt"
+          cat "$RUNNER_TEMP/ssh.txt"
 
       - name: Upload connection info
         uses: actions/upload-artifact@v4
         with:
           name: upterm-connection-${{ github.run_attempt }}
-          path: ssh.txt
+          path: ${{ runner.temp }}/ssh.txt
           if-no-files-found: error
 
+      # 收工标记放在 /tmp, 同理不进检出目录; 固定路径也免去在 SSH 会话里猜 $RUNNER_TEMP 是否可用.
       - name: Wait for continue marker
         run: |
           echo "workspace: $GITHUB_WORKSPACE"
-          echo "调试结束时在 runner 上执行: touch $GITHUB_WORKSPACE/.ssh-debug-continue"
-          until [ -f "$GITHUB_WORKSPACE/.ssh-debug-continue" ]; do
+          echo "调试结束时在 runner 上执行: touch /tmp/ssh-debug-continue"
+          until [ -f /tmp/ssh-debug-continue ]; do
             sleep 5
           done
           echo "marker 已出现, job 收工"

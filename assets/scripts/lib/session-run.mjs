@@ -78,3 +78,14 @@ export function cutFromMarker(text, marker) {
   // 标记那一行是远端 echo 出来的, 后面才是真正的结果.
   return lines.slice(start + 1).join("\n").trim();
 }
+
+// 跑一小段命令并要回输出, 给"问一句答一句"的场合用 (核验文件大小之类).
+// 命令短, 所以等的时间比 runSessionScript 的默认值短.
+export async function queryRemote(sshArgs, script, options = {}) {
+  const result = await runSessionScript(sshArgs, script, {
+    beforeMs: 1200,
+    holdMs: 4000,
+    ...options,
+  });
+  return result.output;
+}

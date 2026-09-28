@@ -5,10 +5,10 @@ import { buildContext, parseArgs } from "./lib/context.mjs";
 import { ensureConnection, sshArgsFor } from "./lib/session.mjs";
 import { runInherit } from "./lib/run.mjs";
 
-runMain(() => {
+runMain(async () => {
   const { options, rest } = parseArgs(process.argv.slice(2));
   const ctx = buildContext(options);
-  const session = ensureConnection(ctx, rest[0]);
+  const session = await ensureConnection(ctx, rest[0]);
   runInherit("ssh", sshArgsFor(session));
   return 0;
 });

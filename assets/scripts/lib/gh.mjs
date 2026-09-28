@@ -4,7 +4,7 @@
 // (gh run download) 与 GraphQL 必须认证. 所以这些调用都按提权执行.
 
 import { fail } from "./log.mjs";
-import { runCmd, tryRun } from "./run.mjs";
+import { tryRun } from "./run.mjs";
 
 // 指定了就用指定的; 没指定就找该分支最近一条 run.
 export function resolveRunId(repo, branch, explicit) {
@@ -31,14 +31,54 @@ export function resolveRunId(repo, branch, explicit) {
 }
 
 // 最近的 upterm-connection-* artifact 名; 没有就返回空串.
+//
+// 用 tryRun 而不是 runCmd: 等 artifact 的时候"还没有"是正常状态, 不是失败.
 export function findConnectionArtifact(repo, runId) {
-  const result = runCmd("gh", [
+  const result = tryRun("gh", [
     "api",
     `repos/${repo}/actions/runs/${runId}/artifacts`,
     "--jq",
     '[.artifacts[] | select(.name | startswith("upterm-connection-"))] | last | .name // ""',
   ]);
+  if (!result.ok) return "";
   return result.stdout.trim();
+}
+
+// run 的当前状态与结论; 查不到返回 null.
+export function runState(repo, runId) {
+  const result = tryRun("gh", ["run", "view", String(runId), "--repo", repo, "--json", "status,conclusion"]);
+  if (!result.ok) return null;
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    return null;
+  }
+}
+
+// 等 upterm-connection-* artifact 出现.
+//
+// runner 从收到 push 到会话就绪通常要一两分钟, 这段是纯粹的等待, 不该让调用方反复拿
+// 自己的 turn 去轮询. run 跑挂时不硬等到超时, 直接报出来.
+export async function waitForConnectionArtifact(repo, runId, options = {}) {
+  const waitSeconds = options.waitSeconds ?? 300;
+  const intervalSeconds = options.intervalSeconds ?? 10;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const deadline = Date.now() + waitSeconds * 1000;
+
+  for (;;) {
+    const artifact = findConnectionArtifact(repo, runId);
+    if (artifact) return artifact;
+
+    const state = runState(repo, runId);
+    if (state && state.status === "completed") {
+      fail(1, `run ${runId} 已经结束 (${state.conclusion}) 但没等到 upterm-connection-* artifact, 说明 workflow 没走通: 先 status ${runId} 看是哪一步挂了.`);
+    }
+    if (Date.now() >= deadline) {
+      fail(1, `等了 ${waitSeconds} 秒还没等到 upterm-connection-* artifact: 先 status ${runId} 看步骤到哪了, 或者调大等待时间.`);
+    }
+    if (options.onTick) options.onTick();
+    await sleep(intervalSeconds * 1000);
+  }
 }
 
 // 解析连接命令 (形如 `ssh user@host` 或 `ssh user@host -p PORT`) 成 scp 能用的三段.

@@ -6,9 +6,9 @@ import { runMain } from "./lib/cli.mjs";
 import { buildContext, parseArgs } from "./lib/context.mjs";
 import { fail, info } from "./lib/log.mjs";
 import { ensureConnection } from "./lib/session.mjs";
-import { runInherit } from "./lib/run.mjs";
+import { handleScpFailure, localStats, remoteStats, runScp, scpArgs } from "./lib/transfer.mjs";
 
-runMain(() => {
+runMain(async () => {
   const { options, rest } = parseArgs(process.argv.slice(2));
   const ctx = buildContext(options);
   const [localPath, remote, runId] = rest;
@@ -20,20 +20,21 @@ runMain(() => {
     fail(1, `本地路径不存在: ${localPath}`);
   }
 
-  const session = ensureConnection(ctx, runId);
+  const session = await ensureConnection(ctx, runId);
   info(`推送 ${localPath} -> ${session.user}@${session.host}:${remote}`);
-  runInherit("scp", [
-    "-P",
-    session.port,
-    "-o",
-    "StrictHostKeyChecking=accept-new",
-    "-o",
-    `UserKnownHostsFile=${session.knownHosts}`,
-    "-o",
-    "ConnectTimeout=10",
-    localPath,
-    `${session.user}@${session.host}:${remote}`,
-  ]);
+  const result = runScp([...scpArgs(session), localPath, `${session.user}@${session.host}:${remote}`]);
+
+  if (!result.ok) {
+    const local2 = localStats(localPath);
+    const remote2 = await remoteStats(session, remote);
+    handleScpFailure(result, {
+      remote: remote2,
+      local: local2,
+      describe: () =>
+        `本地 ${local2 ? `${local2.count} 个文件 / ${local2.bytes} 字节` : "未知"}, runner 上 ${remote} 是 ${remote2 ? `${remote2.kind} ${remote2.count} 个文件 / ${remote2.bytes} 字节` : "未知"}`,
+    });
+  }
+
   info(`已推送到 ${session.user}@${session.host}:${remote}`);
   return 0;
 });

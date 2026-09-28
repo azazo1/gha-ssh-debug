@@ -43,10 +43,10 @@ prep runner ref="HEAD" timeout="30":
 status run_id="":
     @node {{ quote(skill_dir / "scripts/status.mjs") }} --skill-dir={{ quote(skill_dir) }} --branch={{ quote(branch) }} -- {{ quote(run_id) }}
 
-# just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> connection [run-id]
-# 取 upterm 连接命令: 下载 artifact 到临时目录并打印.
-connection run_id="":
-    @node {{ quote(skill_dir / "scripts/connection.mjs") }} --skill-dir={{ quote(skill_dir) }} --branch={{ quote(branch) }} -- {{ quote(run_id) }}
+# just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> connection [run-id] [等待秒数]
+# 等会话就绪 (默认最多等 300 秒), 下载 artifact 到临时目录并打印连接命令.
+connection run_id="" wait="":
+    @node {{ quote(skill_dir / "scripts/connection.mjs") }} --skill-dir={{ quote(skill_dir) }} --branch={{ quote(branch) }} -- {{ quote(run_id) }} {{ quote(wait) }}
 
 # just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> ssh [run-id]
 # 交互式连进 runner. 人类终端用; agent 用 exec, 不走这条.
@@ -57,6 +57,11 @@ ssh run_id="":
 # 把脚本喂进会话并取回这段输出 (agent 在会话里干活走这条, 不要在 shell 里手工拼管道).
 exec script_path run_id="":
     @node {{ quote(skill_dir / "scripts/exec.mjs") }} --skill-dir={{ quote(skill_dir) }} --branch={{ quote(branch) }} {{ quote("--hold-ms=" + hold_ms) }} -- {{ quote(script_path) }} {{ quote(run_id) }}
+
+# just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> run <本地脚本> [run-id] [timeout-seconds] [轮询间隔秒]
+# 把脚本推到 runner 后台跑, 内建轮询, 结束时给出退出码与新增日志 (长任务/复现构建走这条).
+run script_path run_id="" timeout="3600" interval="15":
+    @node {{ quote(skill_dir / "scripts/run.mjs") }} --skill-dir={{ quote(skill_dir) }} --branch={{ quote(branch) }} -- {{ quote(script_path) }} {{ quote(run_id) }} {{ quote(timeout) }} {{ quote(interval) }}
 
 # just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> pull <runner 上的路径> [本地目录] [run-id]
 # 会话还活着时从 runner 上 scp 拉取文件或目录; 不给本地目录就落在 <临时目录>/pull/ 下.

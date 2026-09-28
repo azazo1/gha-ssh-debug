@@ -31,7 +31,7 @@ runMain(async () => {
     fail(1, `脚本 ${scriptPath} 是空的.`);
   }
 
-  const session = ensureConnection(ctx, runId);
+  const session = await ensureConnection(ctx, runId);
   const args = sshArgsFor(session, { batch: true });
   const result = await runSessionScript(args, script, {
     holdMs: options.holdMs ? Number(options.holdMs) : undefined,

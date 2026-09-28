@@ -10,7 +10,8 @@
 #           (例如 dsh/ssh-debug, claude/ssh-debug), 同一个 repo 被两个 harness 同时调试时才不会撞车.
 #           也可以用环境变量 SSH_DEBUG_BRANCH 传.
 #
-# 这些 recipe 要写目标 repo 的 .git 并访问 gh 凭据, 所以调用时要提权.
+# 这些 recipe 要写目标 repo 的 .git 并访问 gh 凭据, 所以调用时要提权
+# (调用参数上就是 sandbox_permissions: danger-full-access 加 approved: true).
 # 在 dsh-approve-prefix 里放行 `just -f <本 skill 目录>/assets/justfile` 即可自动通过, 适合无人值守执行.
 #
 # 实现全在 assets/scripts/*.mjs 里 (node 脚本), 这里只负责派发. 这样做的原因:

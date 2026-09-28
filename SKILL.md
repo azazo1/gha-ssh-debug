@@ -50,13 +50,14 @@ just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> clean
 
 ## 硬约束
 
-这五条破了不是"麻烦一点", 而是会在无人值守时直接卡死或者毁掉结果.
+这六条破了不是"麻烦一点", 而是会在无人值守时直接卡死或者毁掉结果.
 
 1. **命令形态**: 每条命令整条就只是一条 `just ...`. 不要在前后接 `cd`, `sleep`, `&&`, `;`, 不要夹管道和重定向. 要指定目录用 `-d`. allow prefix 只认这种形态; 破了就要人工审批.
 2. **前缀字面量要一致**: 提醒 user 配前缀 (dsh-approve-prefix 里放行 `just -f <skill>/assets/justfile`) 时, 用你实际调用 `-f` 时的那串绝对路径, 一个字都不能差. 自己调用也一律用绝对路径.
 3. **会话里不要 `exit` / `Ctrl-D`**: 会话一结束就彻底没了, 只能重开一个 run 从头来. 断开本地客户端是安全的.
 4. **长任务走 `run`**: 不要让 agent 在 shell 里拼 `nohup + sleep + tail` 的循环. `run` 已经做了后台启动, 增量取日志, 退出码回收.
 5. **收工不留痕**: `done` 然后 `clean`. 不要留下临时分支, worktree, 或者空转的 run.
+6. **每次都提权并写上 `approved: true`**: 调用时带 `sandbox_permissions: "danger-full-access"` 与 `approved: true` (工具 schema 有这两个字段时). recipe 要写目标 repo 的 `.git`, 读 gh 凭据, 在沙箱外跑 ssh / scp, 所以一律提权; `approved: true` 让 dsh-approve-prefix 按前缀直接放行, 不再弹人工审批. 反过来, 前缀没配上时 `approved: true` 会被直接拒掉且不弹审批, 这时的正确反应是核对 `-f` 的绝对路径字面量, 不是退回去不写 `approved`.
 
 ## 更多
 

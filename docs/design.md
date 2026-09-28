@@ -26,8 +26,12 @@ justfile 只做派发, 每个 recipe 是一行 `node <脚本>` 调用, 逻辑全
 
 ## allow prefix 的原理
 
-这些 recipe 要写目标 repo 的 `.git` 并读 gh 凭据, 所以调用时要提权. dsh-approve-prefix 放行
-`just -f <本 skill 目录>/assets/justfile` 之后, 匹配该前缀的**单条命令**会自动通过审批.
+这些 recipe 要写目标 repo 的 `.git` 并读 gh 凭据, 还要在沙箱外跑 ssh / scp, 所以调用时要提权:
+参数上就是 `sandbox_permissions: "danger-full-access"` 加 `approved: true`.
+
+dsh-approve-prefix 放行 `just -f <本 skill 目录>/assets/justfile` 之后, 匹配该前缀的**单条命令**会自动通过审批.
+只提权不写 `approved: true` 有可能退化成弹人工审批 (无人值守时会卡住); 前缀没配上时 `approved: true`
+会让这次调用被直接拒绝, 连审批弹窗都没有, 正好用来暴露前缀字面量写错了.
 
 匹配要求整个命令就是一条简单命令: 前置 `cd` / `sleep`, 后接 `;` / `&&`, 夹管道或重定向都不算.
 所以不要为了省事去拼长命令 —— 那是把自动化能力换成一次性操作.

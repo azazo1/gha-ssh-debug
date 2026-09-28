@@ -12,6 +12,7 @@
 
 - **提醒 user 配的前缀匹配不上**: 前缀里的路径必须是**你实际调用 `-f` 时用的那串绝对路径字面量**. 自己一律用绝对路径, 路径里有空格会让匹配更复杂, 尽量别放这种目录.
 - **建议不要用宽前缀 `just`**: 那样任何以 `just` 开头的命令都会自动放行, 等于把提权执行任意命令的授权交出去.
+- **漏了提权参数**: 每次 `just` 调用都要带 `sandbox_permissions: "danger-full-access"` 与 `approved: true`. 只提权而没写 `approved: true` 会退回人工审批; 前缀没配上时 `approved: true` 会让调用被直接拒绝 (不弹审批), 这时去核对 `-f` 的绝对路径字面量.
 - **命令形态被拼坏**: `gh api foo > file`, `gh api foo | jq`, `for i in; do gh api; done`, 以及前面加 `cd` / `sleep` 都不是单条 argv, allow prefix 吃不到, 每次都要审批 (无人值守时直接卡住). 需要提权的动作走 recipe. 同理, **自己验证 recipe 时也不要为了看图方便加 `| head` / `2>&1`**.
 - **`gh` 并非全都免提权**: 公开仓库的 REST 读 (`gh run list`, `gh api repos/...`) 未认证也能跑, 但 artifact 下载 (`gh run download`) 与 GraphQL (`gh repo view`) 必须认证. 所以 recipe 一律按提权执行.
 

@@ -1,14 +1,15 @@
 # 临时 SSH 调试食谱, 属于 gha-ssh-debug skill.
 #
 # 调用形态:
-#   just -f <本 skill 目录>/assets/justfile -d <目标 repo 主工作树根目录> branch=<harness>/ssh-debug <recipe> [参数]
+#   just -f <本 skill 目录>/assets/justfile -d <目标 repo 主工作树根目录> branch=<harness>/ssh-debug-<主题> <recipe> [参数]
 #
 #   -f  指定本文件, 这样目标 repo 里不必多出任何本 skill 的文件.
 #   -d  把 recipe 的工作目录钉在目标 repo 根目录 (just 默认会切到 justfile 所在目录, 必须用 -d 纠回来).
 #       要指主工作树, 不是 .tmp 下的 worktree.
-#   branch  本次调试用的临时分支名, 由调用者自己定. 别用固定的名字: 不同 harness 用不同前缀
-#           (例如 dsh/ssh-debug, claude/ssh-debug), 同一个 repo 被两个 harness 同时调试时才不会撞车.
-#           也可以用环境变量 SSH_DEBUG_BRANCH 传.
+#   branch  本次调试用的临时分支名, 由调用者按语义命名: 前缀放 harness 名, 后面接本次调试的主题.
+#           例如 dsh/ssh-debug-apk-pull, claude/ssh-debug-ci-build. 别用光秃秃的 dsh/ssh-debug:
+#           主题说清了这条分支为什么存在, 同一个 repo 上并行开多个会话也不会撞车.
+#           SSH_DEBUG 那段别省, check 靠它认出残留的调试分支. 也可以用环境变量 SSH_DEBUG_BRANCH 传.
 #
 # 这些 recipe 要写目标 repo 的 .git 并访问 gh 凭据, 所以调用时要提权
 # (调用参数上就是 sandbox_permissions: danger-full-access 加 approved: true).

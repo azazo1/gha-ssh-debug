@@ -71,7 +71,7 @@ runMain(() => {
   const hasWorkflow = tryRun("gh", ["api", `repos/${repo}/contents/${workflowPath}`]).ok;
   info(hasWorkflow ? "  已存在, 先跟 user 确认是复用还是重铺" : "  没有, ok");
 
-  info("本次要用的临时分支名由你自己定, 形如 <你的 harness 名>/ssh-debug.");
+  info("本次要用的临时分支名由你自己按语义定, 形如 <你的 harness 名>/ssh-debug-<主题>, 例如 dsh/ssh-debug-apk-pull.");
   info("建议在 dsh-approve-prefix 里放行这条前缀:");
   info(`  just -f ${options.skillDir}/justfile`);
   return 0;

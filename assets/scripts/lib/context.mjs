@@ -65,7 +65,7 @@ export function repoFromOrigin(origin) {
 export function buildContext(options = {}) {
   const branch = options.branch || process.env.SSH_DEBUG_BRANCH || "";
   if (!branch) {
-    fail(1, "未指定临时分支名: 请传 branch=<harness>/ssh-debug, 例如 branch=claude/ssh-debug.");
+    fail(1, "未指定临时分支名: 请传 branch=<harness>/ssh-debug-<主题>, 例如 branch=dsh/ssh-debug-apk-pull.");
   }
   if (/[^A-Za-z0-9._/-]/.test(branch)) {
     fail(5, `分支名只允许字母, 数字和 . _ / - : ${branch}`);

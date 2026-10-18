@@ -12,7 +12,7 @@ runMain(() => {
   const explicit = rest[0] || "";
   const runId = explicit || resolveRunId(ctx.repo, ctx.branch, "");
   if (!runId) {
-    fail(1, "请给 run-id, 或者传 branch=<harness>/ssh-debug 并在有 origin 的仓库里执行.");
+    fail(1, "请给 run-id, 或者传 branch=<harness>/ssh-debug-<主题> 并在有 origin 的仓库里执行.");
   }
   runCmd("gh", ["api", "--method", "POST", `repos/${ctx.repo}/actions/runs/${runId}/cancel`]);
   info(`已请求取消 run ${runId}`);

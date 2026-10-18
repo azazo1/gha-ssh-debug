@@ -13,7 +13,9 @@ description: 在正在工作的仓库里借一个 GitHub-hosted runner 开 Upter
 
 前置: 目标 repo 你有 push 权限, `gh` 已登录, 本机有 `just` 与 `node`.
 
-下文 `<skill>` 指本 skill 目录的绝对路径, `<branch>` 指你自定的临时分支名 (形如 `<你的 harness 名>/ssh-debug`).
+下文 `<skill>` 指本 skill 目录的绝对路径, `<branch>` 指你自定的临时分支名, 形如 `<你的 harness 名>/ssh-debug-<主题>`.
+
+`<主题>` 按本次调试的语义取, 不要沿用固定名字: 拉 APK 就叫 `dsh/ssh-debug-apk-pull`, 查 CI 构建失败就叫 `dsh/ssh-debug-ci-build`. 这样一眼能看出这条分支为什么存在, 同一个 repo 上并行开两个会话也不会互相顶掉. `ssh-debug` 这段别省, `check` 靠它认出残留的调试分支.
 
 ```shell
 just -f <skill>/assets/justfile -d <目标 repo> check

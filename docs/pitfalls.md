@@ -46,8 +46,11 @@
   2. `just ... branch=<branch> push .tmp/sync.tar.gz /tmp/sync.tar.gz`.
   3. 本地写短脚本, 内容是 `cd "$GITHUB_WORKSPACE"` (或 `cd "$HOME/work/<repo>/<repo>"`) 和 `tar -xzf /tmp/sync.tar.gz`, 用 `exec` 执行.
   4. 构建前用 `git status --short` 确认文件已变化; `pubspec.lock` 之类构建副产物不要混进 tar.
-- **临时改包名/标签做并行测试**: 不要在提交里留下测试用 `applicationIdSuffix`. 在 runner 的 worktree 里临时改 `android/app/build.gradle.kts` 和 `AndroidManifest.xml`, 构建前备份, 用 `trap` 在退出时还原; 测试包用独立 `applicationId` 和 "测试" 标签, 装完卸载.
-- **覆盖安装前确认签名**: `keytool -printcert -jarfile app.apk` 与从手机拉出的已安装包对比证书 SHA256. 签名不一致时 `adb install -r` 会失败, 不要反复重试, 换独立包名或先确认签名.
+- **Android 产物装回手机前须改包名**: runner 上打出来的 APK 默认还是主应用的 `applicationId`, 装到手机上就是同一个应用: 签名对不上时 `adb install` 直接拒绝, 签名碰巧一致则覆盖主应用, 连数据和登录态一起换成调试版本. 所以装机前一律换测试包名, 不做例外.
+  - 改动位置: Kotlin DSL 看 `android/app/build.gradle.kts` 的 `applicationId`, Groovy 看 `build.gradle` 的同名字段, 再去 `AndroidManifest.xml` 把 `package` 属性一起改掉; Flutter 这类还要看有没有写死的包名 (例如 `MainActivity` 的包目录, 深链 scheme).
+  - 别进主分支: 测试包名和 `applicationIdSuffix` 不能合进长期分支.
+  - 顺手给测试包换个 "测试" 标签, 和主应用在桌面上能分清; 测完卸载.
+- **覆盖安装前确认签名**: `keytool -printcert -jarfile app.apk` 与从手机拉出的已安装包对比证书 SHA256. 签名不一致时 `adb install -r` 会失败, 不要反复重试, 按上一条换成测试包名重装.
 
 ## 复现构建
 

@@ -33,6 +33,7 @@ just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> clean
 - `connection` 会等到 artifact 出现才打印连接命令, 拿到就能干活.
 - `pull` 会自动核验落地文件; 单个文件约 20MB 以上时改用 `pull-large`, 它在 runner 上分块, 逐块核验, 合并后核对 sha256.
 - 收工顺序不能反: 先 `done` 再 `clean`.
+- 构建产物要装到 Android 手机上时, 先**换成测试包名**, 否则会和手机里的主应用冲突: 同包名要么被签名校验拒装, 要么直接覆盖掉主应用. 不过别让它进主分支. 写法见 [docs/pitfalls.md](docs/pitfalls.md).
 
 ## recipe 一览
 

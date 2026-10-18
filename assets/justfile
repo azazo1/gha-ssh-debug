@@ -69,6 +69,11 @@ run script_path run_id="" timeout="3600" interval="15":
 pull remote local_dir="" run_id="":
     @node {{ quote(skill_dir / "scripts/pull.mjs") }} --skill-dir={{ quote(skill_dir) }} --branch={{ quote(branch) }} -- {{ quote(remote) }} {{ quote(local_dir) }} {{ quote(run_id) }}
 
+# just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> pull-large <runner 上的路径> [本地目录] [分块 MB] [run-id]
+# 大于约 20MB 的 APK/日志用这条: runner 上分块, 逐块拉回并核对大小, 合并后再核对 sha256.
+pull-large remote local_dir="" chunk_mb="20" run_id="":
+    @node {{ quote(skill_dir / "scripts/pull-large.mjs") }} --skill-dir={{ quote(skill_dir) }} --branch={{ quote(branch) }} -- {{ quote(remote) }} {{ quote(local_dir) }} {{ quote(chunk_mb) }} {{ quote(run_id) }}
+
 # just -f <本 skill 目录>/assets/justfile -d <目标 repo> branch=<branch> push <本地路径> <runner 上的路径> [run-id]
 # 会话还活着时把本地文件送进 runner, 供 CI 复现使用.
 push local_path remote run_id="":

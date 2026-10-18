@@ -11,16 +11,25 @@
 // 三种结论: 一致 (放过) / 不一致 (报错) / 核验不出来 (由调用方定策略).
 
 import { spawnSync } from "node:child_process";
-import { readdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { fail, warn } from "./log.mjs";
 import { queryRemote } from "./session-run.mjs";
 import { sshArgsFor } from "./session.mjs";
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // 远端路径要经一次 shell, 单引号包住并把内层单引号转义掉.
-function shellQuote(value) {
+export function shellQuote(value) {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+export function localSha256(localPath) {
+  const hash = createHash("sha256");
+  hash.update(readFileSync(localPath));
+  return hash.digest("hex");
 }
 
 // scp 的公共选项. -P 指定端口, 其余与 ssh 一致, known_hosts 走临时目录.
@@ -85,24 +94,76 @@ export function localStats(target) {
   return { kind: "dir", count, bytes };
 }
 
+// 从后往前找第一个匹配的行. 查询输出末尾通常还跟着 shell prompt,
+// 只看最后一行会把 prompt 当结果, 这正是之前核验一直返回 null 的原因.
+function lastMatching(lines, pattern) {
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (pattern.test(lines[i])) return lines[i];
+  }
+  return null;
+}
+
 // runner 上单个文件的字节数; 拿不到返回 null.
 //
-// 单文件是绝大多数场合 (脚本, pkg, 日志), 所以这条要走最短路径: wc -c 一个命令就完事.
-// 重试是因为共享 shell 可能正忙, 一次没回话不代表核验做不了.
-export async function remoteFileSize(session, remotePath, { attempts = 3 } = {}) {
+// 共享 shell 可能正忙, 一次没回话不代表核验做不了. 之前只重试 3 次且等待偏短, 结果
+// scp 明明已经落地却拿不到大小, run 因此误判失败. 这里拉长等待并留出退避时间.
+export async function remoteFileSize(session, remotePath, { attempts = 4 } = {}) {
   const quoted = shellQuote(remotePath);
   for (let i = 0; i < attempts; i += 1) {
-    const output = await queryRemote(sshArgsFor(session, { batch: true }), `wc -c < ${quoted} 2>/dev/null || echo ERR`, {
-      beforeMs: 1200,
-      holdMs: 6000,
-    });
+    if (i > 0) await sleep(1200 * i);
+    const output = await queryRemote(
+      sshArgsFor(session, { batch: true }),
+      `if [ -e ${quoted} ]; then wc -c < ${quoted}; else echo MISSING; fi`,
+      { beforeMs: 1800, holdMs: 8000 },
+    );
     const lines = output
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean);
+    if (lines.includes("MISSING")) return null;
     // 只认整行都是数字的行: 命令回显里含路径 (路径里有数字), 不会整行是数字.
-    const last = lines[lines.length - 1] || "";
-    if (/^\d+$/.test(last)) return Number(last);
+    const value = lastMatching(lines, /^\d+$/);
+    if (value !== null) return Number(value);
+  }
+  return null;
+}
+
+// runner 上文件是否存在且非空; 拿不到结论时返回 null.
+export async function remoteFileExists(session, remotePath, { attempts = 3 } = {}) {
+  const quoted = shellQuote(remotePath);
+  for (let i = 0; i < attempts; i += 1) {
+    if (i > 0) await sleep(1000 * i);
+    const output = await queryRemote(
+      sshArgsFor(session, { batch: true }),
+      `if [ -s ${quoted} ]; then echo PRESENT; else echo MISSING; fi`,
+      { beforeMs: 1800, holdMs: 7000 },
+    );
+    const lines = output
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.includes("PRESENT")) return true;
+    if (lines.includes("MISSING")) return false;
+  }
+  return null;
+}
+
+// runner 上文件的 sha256; 拿不到返回 null.
+export async function remoteSha256(session, remotePath, { attempts = 3 } = {}) {
+  const quoted = shellQuote(remotePath);
+  for (let i = 0; i < attempts; i += 1) {
+    if (i > 0) await sleep(1000 * i);
+    const output = await queryRemote(
+      sshArgsFor(session, { batch: true }),
+      `(sha256sum ${quoted} 2>/dev/null || shasum -a 256 ${quoted} 2>/dev/null) | awk '{print $1}'`,
+      { beforeMs: 1800, holdMs: 8000 },
+    );
+    const lines = output
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const last = lastMatching(lines, /^[0-9a-f]{64}$/);
+    if (last !== null) return last;
   }
   return null;
 }
@@ -118,7 +179,8 @@ async function remoteDirStats(session, remotePath, { attempts = 2 } = {}) {
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean);
-    const match = (lines[lines.length - 1] || "").match(/^(\d+)\s+(\d+)$/);
+    const statLine = lastMatching(lines, /^(\d+)\s+(\d+)$/);
+    const match = statLine ? statLine.match(/^(\d+)\s+(\d+)$/) : null;
     if (match) return { kind: "dir", count: Number(match[1]), bytes: Number(match[2]) };
   }
   return null;

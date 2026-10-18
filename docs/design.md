@@ -41,3 +41,14 @@ dsh-approve-prefix 放行 `just -f <本 skill 目录>/assets/justfile` 之后, �
 `root` / `wt` / `conn` 全部由 `branch` 推导 (`.tmp/ssh-debug-<branch 去掉斜杠>/` 之下), 并且
 不在 justfile 里定义, 只存在于 `context.mjs` 里. 好处是命令行无法把 `clean` 的删除目标改到别处;
 代价是要改路径就得改代码, 而不是传个变量.
+
+## 核验解析的坑
+
+`queryRemote` 返回的是共享 PTY 的原始回显, 末尾一定有 shell prompt (`user@host:dir$`).
+旧代码用 `lines[lines.length - 1]` 取结果, 于是把 prompt 当成 `wc` / `sha256sum` 的返回值,
+`run` 的核验永远是 null, 只能反复重试或误判失败. 现在 `remoteFileSize` / `remoteSha256` /
+`remoteDirStats` 都改为从后往前找符合格式的行 (`lastMatching`). 修改这几个函数时不要退回
+"取最后一行".
+
+另外, `pull-large` 的 `ls` 输出在宽终端里会把多个分块名挤成一行, 所以分块名按 token 取,
+不要按行取. 传输后的核验顺序也不要省: sha256 -> 大小 -> 文件存在, 能确认到什么程度就停在哪.

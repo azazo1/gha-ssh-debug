@@ -46,13 +46,21 @@ runMain(async () => {
     const landed = path.join(dest, path.basename(remote.replace(/\/+$/, "")));
     const local2 = localStats(existsSync(landed) ? landed : dest);
     const remote2 = await remoteStats(session, remote, { kind: local2 && local2.kind });
-    resolveScpResult(result, {
+    const outcome = resolveScpResult(result, {
       remote: remote2,
       local: local2,
       describe: () =>
         `runner 上 ${remote} 是 ${remote2 ? `${remote2.kind} ${remote2.count} 个文件 / ${remote2.bytes} 字节` : "未知"}, 本地 ${local2 ? `${local2.count} 个文件 / ${local2.bytes} 字节` : "未知"}`,
       onInconclusive: "warn",
     });
+    if (outcome === "inconclusive") {
+      // 不再把“未知”当成成功: 大文件被截断时通常就是这种状态, 继续往下会拿到坏文件.
+      fail(
+        2,
+        `scp 结束但无法核验是否完整, 已落地文件保留在 ${dest} 供检查.\n` +
+          "文件较大时改用 pull-large (自动分块并核对 sha256), 不要直接把未核验的文件当产物.",
+      );
+    }
   }
 
   info(`已拉到 ${dest}:`);

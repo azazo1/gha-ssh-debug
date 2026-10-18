@@ -9,6 +9,14 @@ import { spawn } from "node:child_process";
 import { CliError } from "./log.mjs";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// 终端控制序列: CSI (颜色, 光标, bracketed paste) 与 OSC (窗口标题).
+// upterm 回放里这些很多, 不去掉会把 exec 输出弄得没法读, 也会干扰按行取数字的核验.
+const ANSI_PATTERN = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))/g;
+
+export function stripAnsi(text) {
+  return text.replace(ANSI_PATTERN, "");
+}
+
 // 把脚本切成行, 逐行喂进去; 空脚本也要发一个换行, 保证 shell 有动静.
 function toLines(script) {
   return script.split(/\r?\n/);
@@ -58,7 +66,13 @@ export async function runSessionScript(sshArgs, script, options = {}) {
     await sleep(holdMs);
     child.stdin.end();
     const exitCode = await closed;
-    return { output: cutFromMarker(stdout, marker), raw: stdout, stderr, exitCode };
+    const cleanStdout = stripAnsi(stdout);
+    return {
+      output: cutFromMarker(cleanStdout, marker),
+      raw: cleanStdout,
+      stderr: stripAnsi(stderr),
+      exitCode,
+    };
   } catch (cause) {
     child.kill();
     throw cause;

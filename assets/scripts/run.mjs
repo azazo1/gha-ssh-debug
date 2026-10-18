@@ -13,7 +13,7 @@ import { buildContext, parseArgs } from "./lib/context.mjs";
 import { fail, info, warn } from "./lib/log.mjs";
 import { ensureConnection, sshArgsFor } from "./lib/session.mjs";
 import { queryRemote } from "./lib/session-run.mjs";
-import { remoteFileSize, resolveScpResult, runScp, scpArgs } from "./lib/transfer.mjs";
+import { localSha256, remoteFileExists, remoteFileSize, remoteSha256, runScp, scpArgs } from "./lib/transfer.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -87,16 +87,44 @@ runMain(async () => {
   // 1. 传脚本. 走 scp 而不是 PTY, 免得长行被折行截断.
   info(`上传脚本 ${scriptPath} -> ${session.host}:${job.script}`);
   const localSize = statSync(scriptPath).size;
+  const localHash = localSha256(scriptPath);
   const upload = runScp([...scpArgs(session), scriptPath, `${session.user}@${session.host}:${job.script}`]);
   if (!upload.ok) {
-    // 这里不能像 push 那样"核验不出来也放过": 脚本没到手后面一定跑不起来, 得当场说清.
-    const remoteSize = await remoteFileSize(session, job.script);
-    resolveScpResult(upload, {
-      remote: remoteSize === null ? null : { count: 1, bytes: remoteSize },
-      local: { count: 1, bytes: localSize },
-      describe: () => `本地脚本 ${localSize} 字节, runner 上 ${job.script} ${remoteSize === null ? "读不到大小" : `${remoteSize} 字节`}`,
-      onInconclusive: "fail",
-    });
+    // upterm 的 SFTP 通道经常在文件已完整落地后返回非零; 不能只看退出码.
+    // 先用 sha256 判, 拿不到再比大小, 最差也确认文件是否存在且非空.
+    const remoteHash = await remoteSha256(session, job.script);
+    if (remoteHash !== null) {
+      if (remoteHash !== localHash) {
+        fail(
+          1,
+          `scp 报退出码 ${upload.status}, 且脚本 sha256 不一致: 本地 ${localHash}, runner 上 ${remoteHash}.\n` +
+            `脚本可能被截断, 重试 run 或换 push + exec 手工上传.`,
+        );
+      }
+      warn(`scp 报退出码 ${upload.status}, 但脚本 sha256 一致, 按上传成功继续.`);
+    } else {
+      const remoteSize = await remoteFileSize(session, job.script);
+      if (remoteSize !== null) {
+        if (remoteSize !== localSize) {
+          fail(
+            1,
+            `scp 报退出码 ${upload.status}, 且脚本大小不一致: 本地 ${localSize} 字节, runner 上 ${remoteSize} 字节.\n` +
+              `脚本可能被截断, 重试 run.`,
+          );
+        }
+        warn(`scp 报退出码 ${upload.status}, 但脚本大小一致 (${localSize} 字节), 按上传成功继续.`);
+      } else {
+        const present = await remoteFileExists(session, job.script);
+        if (present !== true) {
+          fail(
+            1,
+            `scp 失败 (退出码 ${upload.status}) 且无法确认脚本已落地: ${upload.stderr || "没有 stderr"}\n` +
+              `本地脚本 ${localSize} 字节. 可以重试 run, 或先用 exec 检查 ${job.script}.`,
+          );
+        }
+        warn(`scp 报退出码 ${upload.status}, 大小核验不可用, 但脚本存在; 按上传成功继续.`);
+      }
+    }
   }
 
   // 2. 起后台任务. 退出码单独写文件, 这样才能跟日志分开判断.

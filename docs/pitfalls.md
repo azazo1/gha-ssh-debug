@@ -31,9 +31,23 @@
 ## 文件传输
 
 - **`pull` / `push` 报 exit 8**: 会话走的是 `ws://` / `wss://` 中继 (连接命令里带 `ProxyCommand`), 上游在这种 server 上不提供 SFTP. 换直连 `ssh://` 的 server, 或者改走 artifact.
-- **`pull` / `push` 报 scp 退出码非零, 但随后说核验通过**: 这是 upterm 的 SFTP 通道收尾时报的假失败, 文件是完整的, 按成功处理即可. 核验不出来时 `push` / `pull` 也会先放过 (提示你自己比一下字节数), 因为把已经落地的传输判死更糟; `run` 不一样, 它核验不出来就中止 —— 脚本没到手, 后面一定跑不起来.
+- **scp 报退出码非零, 但文件可能已经完整**: 这是 upterm 的 SFTP 通道收尾时常见的假失败. `run` 和 `push` 现在会依次比 sha256, 比大小, 最后确认文件存在; 三者都拿不到才判失败. `pull` 在 scp 报错且无法核验大小/哈希时直接失败, 不再把可能截断的文件报成成功. 如果 `run` 仍报 "无法确认脚本已落地", 用 `push` + `exec` 手工传一次, 不要反复重试同一条命令.
+- **大文件传到一半断开**: 51MB 的 APK 实测会在 46MB 左右断开, 120MB 更早. `pull` 现在会在 scp 报错且无法核验时直接失败, 不再把截断文件报成成功. 单个文件超过约 20MB 时用 `pull-large`:
+  `just ... branch=<branch> pull-large /tmp/artifact.apk .tmp/out`
+  它会在 runner 上 split, 逐块拉回并核对大小, 合并后再核对 sha256. 分块大小默认 20MB, 不要贪大.
+- **不要手工拿 `pull` 拼大文件**: 每次 `pull` 都只传一个路径; 反复 `pull` 分块再 `cat` 是旧做法, 容易漏块或顺序错. 直接用 `pull-large`.
 - **scp 报 publickey 被拒**: 通道用的还是触发者那把私钥, 和 ssh 会话同一套限制, 本机私钥得登记在触发者账号上.
 - **会话结束后才想起来取产物**: SFTP 通道已经没了. 回到 artifact 那条路: 在模板里加一个 `actions/upload-artifact` 步骤, 收工后用 `gh run download` 拉下来 (`connection` 里就是这么下载 `ssh.txt` 的).
+
+## 未提交改动与临时构建
+
+- **`prep` 不包含工作区改动**: 它从 git 的 ref 建 worktree, 未提交文件不会出现在 runner. 需要带未提交改动时, 在本地打 tar, 用 `push` 传上去, 再用 `exec` 解包. 可复用写法:
+  1. 本地 `tar -czf .tmp/sync.tar.gz <相对路径...>`.
+  2. `just ... branch=<branch> push .tmp/sync.tar.gz /tmp/sync.tar.gz`.
+  3. 本地写短脚本, 内容是 `cd "$GITHUB_WORKSPACE"` (或 `cd "$HOME/work/<repo>/<repo>"`) 和 `tar -xzf /tmp/sync.tar.gz`, 用 `exec` 执行.
+  4. 构建前用 `git status --short` 确认文件已变化; `pubspec.lock` 之类构建副产物不要混进 tar.
+- **临时改包名/标签做并行测试**: 不要在提交里留下测试用 `applicationIdSuffix`. 在 runner 的 worktree 里临时改 `android/app/build.gradle.kts` 和 `AndroidManifest.xml`, 构建前备份, 用 `trap` 在退出时还原; 测试包用独立 `applicationId` 和 "测试" 标签, 装完卸载.
+- **覆盖安装前确认签名**: `keytool -printcert -jarfile app.apk` 与从手机拉出的已安装包对比证书 SHA256. 签名不一致时 `adb install -r` 会失败, 不要反复重试, 换独立包名或先确认签名.
 
 ## 复现构建
 

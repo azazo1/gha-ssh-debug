@@ -22,13 +22,16 @@ just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> connection
 just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> exec <本地脚本>   # 短命令, 看即时输出
 just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> run <本地脚本>    # 长任务, 内建轮询
 just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> pull <runner 上的路径>
+just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> pull-large <runner 上的路径>  # 大 APK/日志
 just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> done
 just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> clean
 ```
 
 - `check` 只读, 报目标仓库, `.tmp/` 忽略状态, 目标 CI 的 `runs-on` 候选, 残留物, 以及建议放行的前缀. runner label 就取它的输出.
 - `prep` 幂等: 换 runner 再跑一次即可 (记得取消旧 run).
+- `prep` 只检出已提交的 ref; 需要带未提交改动时, 先在本地打 tar, `push` 到 runner, 再用 `exec` 解包. 不要假设 worktree 带着工作区改动.
 - `connection` 会等到 artifact 出现才打印连接命令, 拿到就能干活.
+- `pull` 会自动核验落地文件; 单个文件约 20MB 以上时改用 `pull-large`, 它在 runner 上分块, 逐块核验, 合并后核对 sha256.
 - 收工顺序不能反: 先 `done` 再 `clean`.
 
 ## recipe 一览
@@ -41,7 +44,8 @@ just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> clean
 | `connection [run-id] [等待秒数]` | 等会话就绪 (默认最多 300 秒), 下载 `upterm-connection-*` artifact 并打印连接命令 |
 | `exec <本地脚本> [run-id]` | 把脚本喂进会话并取回这段输出, 适合短命令 |
 | `run <本地脚本> [run-id] [timeout] [间隔]` | 推到 runner 后台跑, 内建轮询, 结束时给出退出码与新增日志 |
-| `pull <runner 路径> [本地目录] [run-id]` | 会话活着时把 runner 上的文件或目录 scp 拉回本地 |
+| `pull <runner 路径> [本地目录] [run-id]` | 会话活着时把 runner 上的文件或目录 scp 拉回本地, 并核验大小 |
+| `pull-large <runner 路径> [本地目录] [分块 MB] [run-id]` | 大文件分块拉取, 逐块核大小, 合并后核对 sha256 |
 | `push <本地路径> <runner 路径> [run-id]` | 反过来把本地文件送进 runner |
 | `done [run-id]` | 收工: 放标记并退出会话, 让 run 收尾成 `success` |
 | `cancel [run-id]` | 取消 run; 不带 id 就取消该分支最近一条 |

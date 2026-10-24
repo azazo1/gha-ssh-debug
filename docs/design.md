@@ -10,7 +10,7 @@ justfile 只做派发, 每个 recipe 是一行 `node <脚本>` 调用, 逻辑全
   - `log.mjs`: 输出与退出码 (含 EPIPE 处理, 免得管道被下游截断时吐栈).
   - `run.mjs`: 执行外部命令.
   - `context.mjs`: 参数解析, branch 与 cwd 校验, 派生路径推导.
-  - `gh.mjs`: gh 调用, 连接命令解析, 等 artifact.
+  - `gh.mjs`: gh 调用, 按 workflow 文件路径认 run, 连接命令解析, 等 artifact.
   - `session.mjs`: 取连接信息, 拼 ssh 参数.
   - `session-run.mjs`: 往共享 PTY 喂命令并按标记截输出.
   - `transfer.mjs`: scp 传输与落地核验.

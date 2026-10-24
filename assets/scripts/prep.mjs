@@ -71,6 +71,7 @@ runMain(() => {
 
   info(`已推送 ${ctx.branch} (runs-on=${runner}, timeout-minutes=${timeout}).`);
   info("注意: 这次 push 也会触发目标仓库自身的 on: push CI; 如果它没有分支过滤, 会多跑一套完整构建.");
+  info(`之后各 recipe 只认 ${ctx.workflowPath} 的 run, 不会被那条 CI 顶掉; status 里带 [调试] 的才是本次会话.`);
   info("prep 只检出已提交的 ref; 未提交改动要用 push 传 patch/tar, 再在会话里解包, 不要假设 worktree 带着工作区改动.");
   info(`接下来: just -f ${options.skillDir}/justfile -d ${ctx.cwd} branch=${ctx.branch} status`);
   return 0;

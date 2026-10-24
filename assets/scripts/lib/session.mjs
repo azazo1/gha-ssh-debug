@@ -5,8 +5,8 @@
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
-import { fail, info } from "./log.mjs";
-import { findConnectionArtifact, parseSshCommand, resolveRunId, waitForConnectionArtifact } from "./gh.mjs";
+import { fail, info, warn } from "./log.mjs";
+import { findConnectionArtifact, parseSshCommand, resolveRun, waitForConnectionArtifact } from "./gh.mjs";
 import { runCmd } from "./run.mjs";
 
 // conn 是推导出来的路径, 这里再核一次: 它是 rm -rf 的目标, 不能落到别处.
@@ -22,7 +22,11 @@ export function assertSafeConn(conn) {
 // 好让 agent 不用自己轮询. 其余 recipe 进来时会话已经在了, 不用等.
 export async function ensureConnection(ctx, explicitRunId, options = {}) {
   assertSafeConn(ctx.conn);
-  const runId = resolveRunId(ctx.repo, ctx.branch, explicitRunId);
+  const { id: runId, run } = resolveRun(ctx, explicitRunId);
+  if (run) {
+    // 走 stderr: connection 的 stdout 就是要被整段拿去用的连接命令, 别在前面多一行.
+    warn(`run ${runId}: ${run.path} (${run.event}, ${run.status}/${run.conclusion ?? "-"})`);
+  }
 
   const artifact =
     options.waitSeconds > 0

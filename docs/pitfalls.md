@@ -5,6 +5,7 @@
 - **dispatch 报 404 `not found on the default branch`**: 只在临时分支上放了文件. `workflow_dispatch` 只对"文件已存在于默认分支"的 workflow 生效, 所以首次必须靠 push 触发; 同一个路径成功跑过一次之后就被注册了, 之后才能 dispatch.
 - **dispatch 报 422 `Workflow does not have 'workflow_dispatch' trigger`**: 这份文件没声明 dispatch 触发器; 模板里声明了, 别删掉.
 - **拿不到连接命令**: 走 artifact. 在 job 进行中读 step 日志只会得到 `BlobNotFound`. `connection` 默认会等到 artifact 出现, 也可以调大等待秒数.
+- **`connection` 认到别的 action 上**: `prep` 的 push 会同时拉起目标仓库自己的 `on: push` CI, 同一分支上两条 run 的 event 都是 push. 现在所有 recipe 按 workflow 文件路径 (`.github/workflows/ssh-debug-upterm.yml`) 认 run, 不再取"分支上最近一条"; `status` 会标出哪条是 `[调试]`. 一条 `[调试]` 都没有说明这次 push 没把调试 workflow 带上, 或者它被目标仓库的分支过滤 / 路径过滤挡住了. `cancel` 与 `clean` 同理, 只动调试 workflow 自己的 run, 不碰目标仓库的 CI.
 - **会话突然没了**: 多半是在远程打了 `exit` 或 `Ctrl-D`. 只能重新开一个 run.
 - **run 一直不结束**: 只放了标记没结束会话, post 步骤在等它. 用 `cancel` 收掉.
 

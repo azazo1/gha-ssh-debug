@@ -1,4 +1,4 @@
-// 与 gh 打交道的公共部分: 解析 run id, 取 artifact 列表.
+// 与 gh 打交道的公共部分: 认 run, 取 artifact 列表.
 //
 // gh 并非全都免提权: 公开仓库的 REST 读在沙箱内未认证也能跑, 但 artifact 下载
 // (gh run download) 与 GraphQL 必须认证. 所以这些调用都按提权执行.
@@ -6,28 +6,46 @@
 import { fail } from "./log.mjs";
 import { tryRun } from "./run.mjs";
 
-// 指定了就用指定的; 没指定就找该分支最近一条 run.
-export function resolveRunId(repo, branch, explicit) {
-  if (explicit) return String(explicit);
+// 分支上的 run 列表 (按 id 倒序), 只取认 run 需要的字段.
+//
+// 用 REST 而不是 `gh run list`: 认 run 靠的是 workflow 文件路径, 而 run list 的
+// --json 没有 path 字段, workflowName 又要反查 workflow 注册表, 非默认分支上的
+// 文件未必在里面.
+export function listBranchRuns(repo, branch, limit = 50) {
   const result = tryRun("gh", [
-    "run",
-    "list",
-    "--repo",
-    repo,
-    "--branch",
-    branch,
-    "--limit",
-    "1",
-    "--json",
-    "databaseId",
+    "api",
+    `repos/${repo}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=${limit}`,
     "--jq",
-    ".[0].databaseId",
+    "[.workflow_runs[] | {id, path, event, status, conclusion, headSha: .head_sha, createdAt: .created_at}] | sort_by(.id) | reverse",
   ]);
-  const id = result.stdout.trim();
-  if (!result.ok || !id || id === "null") {
-    fail(1, `分支 ${branch} 上还没有 run, 先 prep.`);
+  if (!result.ok) {
+    return { ok: false, detail: (result.stderr || result.stdout).trim() };
   }
-  return id;
+  try {
+    return { ok: true, runs: JSON.parse(result.stdout) };
+  } catch {
+    return { ok: false, detail: "解析 gh api 返回的 JSON 失败" };
+  }
+}
+
+// 解析出这次要操作的 run: 只认我们铺的那条 workflow.
+//
+// prep 的 push 会顺带拉起目标仓库自己的 on: push CI, 同一分支上于是有好几条
+// event 都是 push 的 run. 按"分支上最近一条"取就会认领到别人的那条, 连接信息
+// 自然对不上, 所以按 workflow 文件路径认, 这是唯一能确定归属的字段.
+export function resolveRun(ctx, explicitRunId) {
+  if (explicitRunId) return { id: String(explicitRunId), run: null };
+
+  const listed = listBranchRuns(ctx.repo, ctx.branch);
+  if (!listed.ok) {
+    fail(1, `查不到分支 ${ctx.branch} 上的 run: ${listed.detail || "gh api 调用失败"}. 确认 gh 可用并已登录.`);
+  }
+  const mine = listed.runs.filter((run) => run.path === ctx.workflowPath);
+  if (mine.length === 0) {
+    const seen = [...new Set(listed.runs.map((run) => run.path))].join(", ") || "无";
+    fail(1, `分支 ${ctx.branch} 上没有 ${ctx.workflowPath} 的 run; 分支上现有的 workflow: ${seen}. 先 prep, 或者确认这次 push 有没有带上调试 workflow.`);
+  }
+  return { id: String(mine[0].id), run: mine[0] };
 }
 
 // 最近的 upterm-connection-* artifact 名; 没有就返回空串.

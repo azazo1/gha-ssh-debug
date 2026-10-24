@@ -33,6 +33,7 @@ just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> clean
 - `prep` 幂等: 换 runner 再跑一次即可 (记得取消旧 run).
 - `prep` 只检出已提交的 ref; 需要带未提交改动时, 先在本地打 tar, `push` 到 runner, 再用 `exec` 解包. 不要假设 worktree 带着工作区改动.
 - `connection` 会等到 artifact 出现才打印连接命令, 拿到就能干活.
+- `connection` 只认调试 workflow (`ssh-debug-upterm.yml`) 自己的 run, 不会被同一分支上目标仓库的 `on: push` CI 抢走.
 - `pull` 会自动核验落地文件; 单个文件约 20MB 以上时改用 `pull-large`, 它在 runner 上分块, 逐块核验, 合并后核对 sha256.
 - 收工顺序不能反: 先 `done` 再 `clean`.
 - 构建产物要装到 Android 手机上时, 先**换成测试包名**, 否则会和手机里的主应用冲突: 同包名要么被签名校验拒装, 要么直接覆盖掉主应用. 不过别让它进主分支. 写法见 [docs/pitfalls.md](docs/pitfalls.md).
@@ -43,16 +44,16 @@ just -f <skill>/assets/justfile -d <目标 repo> branch=<branch> clean
 | --- | --- |
 | `check` | 只读体检: 目标仓库, `.tmp/` 忽略状态, `runs-on` 候选, 残留物, 建议的 allow prefix |
 | `prep <runner> [ref] [timeout-minutes]` | 开临时 worktree, 生成 workflow, 提交并推送临时分支 |
-| `status [run-id]` | 不带 id 列该分支最近的 run; 带 id 打印状态, 步骤结论与 artifact |
-| `connection [run-id] [等待秒数]` | 等会话就绪 (默认最多 300 秒), 下载 `upterm-connection-*` artifact 并打印连接命令 |
+| `status [run-id]` | 不带 id 列该分支上的 run 并标出哪条是调试 workflow; 带 id 打印状态, 步骤结论与 artifact |
+| `connection [run-id] [等待秒数]` | 等会话就绪 (默认最多 300 秒), 下载调试 run 的 `upterm-connection-*` artifact 并打印连接命令 |
 | `exec <本地脚本> [run-id]` | 把脚本喂进会话并取回这段输出, 适合短命令 |
 | `run <本地脚本> [run-id] [timeout] [间隔]` | 推到 runner 后台跑, 内建轮询, 结束时给出退出码与新增日志 |
 | `pull <runner 路径> [本地目录] [run-id]` | 会话活着时把 runner 上的文件或目录 scp 拉回本地, 并核验大小 |
 | `pull-large <runner 路径> [本地目录] [分块 MB] [run-id]` | 大文件分块拉取, 逐块核大小, 合并后核对 sha256 |
 | `push <本地路径> <runner 路径> [run-id]` | 反过来把本地文件送进 runner |
 | `done [run-id]` | 收工: 放标记并退出会话, 让 run 收尾成 `success` |
-| `cancel [run-id]` | 取消 run; 不带 id 就取消该分支最近一条 |
-| `clean` | 取消残留 run, 删远程分支, 移除 worktree, 删本地分支与临时目录 |
+| `cancel [run-id]` | 取消 run; 不带 id 就取消该分支上调试 workflow 的那条 |
+| `clean` | 取消残留的调试 run, 删远程分支, 移除 worktree, 删本地分支与临时目录 |
 | `ssh [run-id]` | 交互式连进去, 人类终端用 (agent 走 `exec`) |
 
 ## 硬约束

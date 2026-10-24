@@ -1,4 +1,4 @@
-// clean: 取消还在跑的 run, 删远程临时分支, 移除 worktree, 删本地分支与临时目录.
+// clean: 取消还在跑的调试 run, 删远程临时分支, 移除 worktree, 删本地分支与临时目录.
 
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -6,6 +6,7 @@ import path from "node:path";
 import { runMain } from "./lib/cli.mjs";
 import { buildContext, parseArgs } from "./lib/context.mjs";
 import { error, fail, info } from "./lib/log.mjs";
+import { listBranchRuns } from "./lib/gh.mjs";
 import { tryRun } from "./lib/run.mjs";
 
 // root 是 rm -rf 的目标, 动手前再核一次.
@@ -47,26 +48,21 @@ runMain(() => {
   info(`将要清理: 远端分支 ${ctx.branch}, worktree ${ctx.wt}, 本地分支 ${ctx.branch}, 目录 ${ctx.root}`);
 
   const failures = [];
-  const runs = tryRun("gh", [
-    "run",
-    "list",
-    "--repo",
-    ctx.repo,
-    "--branch",
-    ctx.branch,
-    "--limit",
-    "10",
-    "--json",
-    "databaseId,status",
-    "--jq",
-    '.[] | select(.status != "completed") | .databaseId',
-  ]);
-  if (!runs.ok) {
-    recordFailure(failures, "查询未结束的 run", runs);
+  // 只收调试 workflow 自己的 run: 目标仓库的 on: push CI 也会跑在这条分支上,
+  // 那是别人的构建, 不能顺手取消.
+  const listed = listBranchRuns(ctx.repo, ctx.branch);
+  if (!listed.ok) {
+    failures.push(`查询分支上的 run 失败: ${listed.detail || "gh api 调用失败"}`);
   } else {
-    for (const id of runs.stdout.split(/\r?\n/).filter(Boolean)) {
-      const cancelled = tryRun("gh", ["api", "--method", "POST", `repos/${ctx.repo}/actions/runs/${id}/cancel`]);
-      if (!cancelled.ok) recordFailure(failures, `取消 run ${id}`, cancelled);
+    const active = listed.runs.filter((run) => run.status !== "completed");
+    const mine = active.filter((run) => run.path === ctx.workflowPath);
+    const others = active.filter((run) => run.path !== ctx.workflowPath);
+    for (const run of mine) {
+      const cancelled = tryRun("gh", ["api", "--method", "POST", `repos/${ctx.repo}/actions/runs/${run.id}/cancel`]);
+      if (!cancelled.ok) recordFailure(failures, `取消 run ${run.id}`, cancelled);
+    }
+    if (others.length > 0) {
+      info(`分支上还有 ${others.length} 条目标仓库自己的 run 没结束, 不去取消: ${others.map((run) => run.id).join(", ")}`);
     }
   }
 
